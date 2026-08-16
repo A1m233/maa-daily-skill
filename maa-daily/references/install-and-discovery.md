@@ -2,7 +2,7 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-08-16
+- 最近核验日期：2026-08-17
 - 实测环境：Windows x64，maa-cli 0.7.5，MaaCore 6.16.8
 - 官方来源：[maa-cli 安装](https://docs.maa.plus/en-us/manual/cli/install.html)、[使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[maa-cli 仓库](https://github.com/MaaAssistantArknights/maa-cli)
 - 边界：以下路径、版本、磁盘占用和现象来自一次真实 Windows 首装，是诊断线索而非永久契约。其他平台直接遵循当前官方文档。
@@ -104,6 +104,17 @@ maa install stable --batch --test-time 0
 maa-cli 0.7.5 实测在 `maa run`（包括 `--dry-run`）进入 task 解析前可能访问 `api.maa.plus` 更新 hot-update 资源。本机代理提前断开连接时，命令会报告 `Network error: unexpected end of file`，此时不能据此断言 task/profile 有错。
 
 使用 `-v` 或 `-vv` 分层观察：如果日志停在 `Updating hot update files` 和 HTTP 请求阶段，先处理网络路径；如果已经打印 task summary 或 MaaCore 装配错误，再按配置问题处理。需要绕过有问题的代理时，只为当前 maa-cli 子进程临时移除代理环境变量，并取得与网络变化相称的用户同意；不要静默修改系统或持久代理配置。
+
+## Windows 日志文件
+
+官方 CLI 支持裸 `--log-file` 或 `--log-file=<path>`。maa-cli 0.7.5 在 Windows 的一次实测中，裸 `--log-file` 因自动文件名不符合 Windows 路径规则而在任务开始前报 `os error 123`。需要 CLI 文件日志时，显式给出不含冒号的文件名，例如：
+
+```powershell
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+maa run maa-daily --batch --profile default --log-file="maa-$stamp.log"
+```
+
+这是一条版本化兼容提示，不代表后续版本仍存在该问题。即使指定了 CLI 日志文件，MaaCore 的识别与任务链细节通常仍应从 `maa dir log --batch` 指向的 `asst.log` 核对；终端 summary、CLI 日志和 MaaCore 日志承担的证据范围可能不同。
 
 ## 初始化 profile
 

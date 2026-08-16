@@ -2,7 +2,7 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-08-16
+- 最近核验日期：2026-08-17
 - 实测环境：maa-cli 0.7.5，MaaCore 6.16.8
 - 官方来源：[maa-cli 配置](https://docs.maa.plus/en-us/manual/cli/config.html)、[使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
 - 边界：maa-cli 与 MaaCore 参数会演进。以下示例用于理解当前形态，生成真实配置前核对当前帮助和官方任务参数。
@@ -77,7 +77,17 @@ params = { award = true, mail = true }
 
 task 是否需要 `StartUp` 取决于真实起始界面。2026-08-16 的 Windows + MuMu 实测中，游戏停在黄色 `START` 登录页时直接执行 `Award`，ADB、截图与触控均成功，但 MaaCore 无法从该页开始奖励流程；在前面加入上述 `StartUp` 后，能先进入主界面再完成 `Award`。如果用户明确保持在可识别主界面，可以按实际流程省略；不要把 `StartUp` 机械加到所有局部任务。
 
+`StartUp` 也不是任意界面的通用恢复原语。2026-08-17 实测从信用商店“获得物资”弹窗启动时，`StartUp` 无法识别该局部状态并最终报错。已知流程可能停在结果弹窗或其他业务中间态时，把对应恢复节点放在 Custom 任务入口前部，再进入常规导航；只有确实需要处理客户端未启动、登录页或主页导航时才依赖 `StartUp`。
+
 variants 可以按时间、星期或日期选择参数。只有用户确实需要条件化日常时才引入，避免把简单偏好变成难维护规则。多个 variant 匹配时注意当前 `first`/`merge` 策略。
+
+需要表达关卡优先级时，可以用有序、可能重叠的 weekday variants 配合 `strategy = "merge"`，让后匹配的参数覆盖前值。它表达的是当前日期下的参数选择，不是运行时关卡失败后的 fallback。关卡开放日会变化，实际生成前核对当前游戏与 MaaCore 资料，并从日志确认最终选择的 stage。
+
+`Fight` 的“清理理智”通常表示重复执行到下一次战斗已无法支付，而不是保证余额恰好为零。`medicine = 0`、`stone = 0` 时仍可能打开恢复理智界面后正常关闭；只要没有消耗对应资源且任务按配置停止，不应误报为异常。
+
+`Recruit.times` 是尝试上限，还会受到账号已开放槽位和当前槽位状态限制。配置四次而账号只有三个可用槽位时，实际执行三次属于受容量限制的结果；报告“最多四次”而不是承诺精确完成四次。
+
+`Infrast` 使用 `facility = []`、`drones = "_NotUse"`、`continue_training = false` 在 MaaCore 6.16.8 实测会停留在基建总览并执行批量收取，可领取干员信赖、制造产物和订单，不换班、不使用无人机。这个模式不覆盖线索、疲劳处理等其他基建事务，不要称为“完成全部基建日常”。
 
 ## 检查与 dry-run
 

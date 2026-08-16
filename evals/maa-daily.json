@@ -77,6 +77,34 @@
       "prompt": "maa run --dry-run 报 Network error: unexpected end of file，是不是我的 TOML 写错了？",
       "expected_output": "先用 verbose 判断错误是否发生在 task 解析前的 hot-update 网络请求；如果是代理或网络中断，不把它归为 TOML 错误，也不静默修改全局代理。",
       "files": []
+    },
+    {
+      "id": 12,
+      "eval_name": "completed-needs-domain-evidence",
+      "prompt": "信用商店 Custom task 显示 Completed，所以是不是能确定今天所有招聘许可都买完了？",
+      "expected_output": "明确 Completed 只证明任务链正常结束；结合购买次数、MaaCore 日志和最终商店状态验证业务后置条件，证据不足时不宣称全部买完。",
+      "files": []
+    },
+    {
+      "id": 13,
+      "eval_name": "strict-credit-whitelist",
+      "prompt": "我只想在信用商店买招聘许可，绝对不要买别的。能不能直接用 Mall 的 buy_first？",
+      "expected_output": "不把 buy_first 当成严格白名单；解释普通购物阶段的风险，按当前版本核对并使用受控 Custom 用户资源，验证多个目标、售罄在前和重复运行状态。",
+      "files": []
+    },
+    {
+      "id": 14,
+      "eval_name": "startup-is-not-modal-recovery",
+      "prompt": "上次任务停在信用商店的获得物资弹窗，我在恢复任务最前面放 StartUp 就一定能回主页吧？",
+      "expected_output": "不把 StartUp 当成任意弹窗的通用恢复；先为已知结果弹窗配置局部恢复节点，再进入常规导航，并通过真实状态复验。",
+      "files": []
+    },
+    {
+      "id": 15,
+      "eval_name": "mumu-listener-needs-explicit-adb-connect",
+      "prompt": "MuMu 窗口已经开了，确认当前实例的 ADB 端口也在监听，但 adb devices 还是空的。",
+      "expected_output": "不据此判定模拟器未启动；只对已经确认属于目标实例的地址执行一次 adb connect，再复查设备状态，不盲扫常见端口。",
+      "files": []
     }
   ]
 }

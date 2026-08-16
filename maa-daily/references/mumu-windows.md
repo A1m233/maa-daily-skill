@@ -2,7 +2,7 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-08-16
+- 最近核验日期：2026-08-17
 - 实测环境：明日方舟专版 MuMu 12，安装根 `C:\Program Files\YXArkNights-12.0`
 - 实测 ADB：`shell\adb.exe`，Android Debug Bridge 34.0.1
 - 官方来源：[MAA 连接设置](https://docs.maa.plus/zh-cn/manual/connection.html)、[Windows 模拟器支持](https://docs.maa.plus/en-us/manual/device/windows.html)、[maa-cli 配置](https://docs.maa.plus/en-us/manual/cli/config.html)
@@ -53,6 +53,14 @@ C:\Program Files\YXArkNights-12.0\
 ```
 
 这些端口只是诊断线索。多开、网络桥接和新版 MuMu 可能不同，以当前实例证据为准。
+
+MuMu 已运行且端口已监听时，`adb devices` 仍可能暂时没有设备条目。2026-08-17 的明日方舟专版 MuMu 12 实测中，确认当前实例拥有 `127.0.0.1:16384` 监听端口后，对该已确认地址执行一次：
+
+```powershell
+& '<MuMuRoot>\shell\adb.exe' connect 127.0.0.1:16384
+```
+
+随后设备正常注册。空的 `adb devices` 不能单独证明模拟器未启动；先交叉核对窗口/实例、进程和监听端口，再只连接已确认地址。不要把这条经验变成对常见端口的盲扫。
 
 ## 原生 profile 示例
 

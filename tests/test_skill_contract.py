@@ -22,6 +22,8 @@ class SkillContractTests(unittest.TestCase):
             "references/native-config.md",
             "references/mumu-windows.md",
             "references/safety-and-results.md",
+            "references/custom-tasks.md",
+            "assets/strict-credit-recruit-permit/tasks/tasks.json",
         }
         actual = {
             path.relative_to(SKILL_ROOT).as_posix()
@@ -59,9 +61,22 @@ class SkillContractTests(unittest.TestCase):
     def test_references_have_verification_metadata(self) -> None:
         for path in (SKILL_ROOT / "references").glob("*.md"):
             content = path.read_text(encoding="utf-8")
-            self.assertIn("最近核验日期：2026-08-16", content, path.name)
+            self.assertRegex(content, r"最近核验日期：20\d{2}-\d{2}-\d{2}")
             self.assertIn("官方来源", content, path.name)
             self.assertIn("边界", content, path.name)
+
+    def test_strict_credit_resource_is_scoped_and_parseable(self) -> None:
+        path = SKILL_ROOT / "assets" / "strict-credit-recruit-permit" / "tasks" / "tasks.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        scan = payload["MaaDailyCredit@ScanRecruitPermits"]
+        slots = [name for name in scan["next"] if "FindRecruitPermit" in name]
+        self.assertEqual(10, len(slots))
+        for name in slots:
+            task = payload[name]
+            self.assertEqual(["招聘许可"], task["text"])
+            self.assertEqual("ClickSelf", task["action"])
+        bought = payload["MaaDailyCredit@CreditShop-Bought"]
+        self.assertEqual("CreditShop-Bought.png", bought["template"])
 
     def test_eval_contract_is_well_formed(self) -> None:
         payload = json.loads((ROOT / "evals" / "maa-daily.json").read_text(encoding="utf-8"))

@@ -1,0 +1,128 @@
+{
+  "MaaDailyCredit@CreditStoreOcr": {
+    "baseTask": "CreditStoreOcr",
+    "next": [
+      "MaaDailyCredit@CollectCredit",
+      "MaaDailyCredit@CreditStoreFailed",
+      "MaaDailyCredit@ScanRecruitPermits"
+    ]
+  },
+  "MaaDailyCredit@CloseCollectCredit": {
+    "baseTask": "CloseCollectCredit",
+    "next": [
+      "MaaDailyCredit@CrisisPopup",
+      "MaaDailyCredit@ScanRecruitPermits"
+    ]
+  },
+  "MaaDailyCredit@CrisisPopup": {
+    "baseTask": "CrisisPopup",
+    "next": [
+      "#self",
+      "MaaDailyCredit@ScanRecruitPermits"
+    ]
+  },
+  "MaaDailyCredit@ScanRecruitPermits": {
+    "algorithm": "JustReturn",
+    "next": [
+      "MaaDailyCredit@FindRecruitPermit1",
+      "MaaDailyCredit@FindRecruitPermit2",
+      "MaaDailyCredit@FindRecruitPermit3",
+      "MaaDailyCredit@FindRecruitPermit4",
+      "MaaDailyCredit@FindRecruitPermit5",
+      "MaaDailyCredit@FindRecruitPermit6",
+      "MaaDailyCredit@FindRecruitPermit7",
+      "MaaDailyCredit@FindRecruitPermit8",
+      "MaaDailyCredit@FindRecruitPermit9",
+      "MaaDailyCredit@FindRecruitPermit10",
+      "Stop"
+    ]
+  },
+  "MaaDailyCredit@FindRecruitPermit1": {
+    "algorithm": "OcrDetect",
+    "text": ["招聘许可"],
+    "roi": [0, 130, 256, 80],
+    "action": "ClickSelf",
+    "postDelay": 500,
+    "next": ["MaaDailyCredit@CreditShop-BuyIt", "MaaDailyCredit@FindRecruitPermit2", "MaaDailyCredit@FindRecruitPermit3", "MaaDailyCredit@FindRecruitPermit4", "MaaDailyCredit@FindRecruitPermit5", "MaaDailyCredit@FindRecruitPermit6", "MaaDailyCredit@FindRecruitPermit7", "MaaDailyCredit@FindRecruitPermit8", "MaaDailyCredit@FindRecruitPermit9", "MaaDailyCredit@FindRecruitPermit10", "Stop"]
+  },
+  "MaaDailyCredit@FindRecruitPermit2": {
+    "algorithm": "OcrDetect",
+    "text": ["招聘许可"],
+    "roi": [256, 130, 256, 80],
+    "action": "ClickSelf",
+    "postDelay": 500,
+    "next": ["MaaDailyCredit@CreditShop-BuyIt", "MaaDailyCredit@FindRecruitPermit3", "MaaDailyCredit@FindRecruitPermit4", "MaaDailyCredit@FindRecruitPermit5", "MaaDailyCredit@FindRecruitPermit6", "MaaDailyCredit@FindRecruitPermit7", "MaaDailyCredit@FindRecruitPermit8", "MaaDailyCredit@FindRecruitPermit9", "MaaDailyCredit@FindRecruitPermit10", "Stop"]
+  },
+  "MaaDailyCredit@FindRecruitPermit3": {
+    "algorithm": "OcrDetect",
+    "text": ["招聘许可"],
+    "roi": [512, 130, 256, 80],
+    "action": "ClickSelf",
+    "postDelay": 500,
+    "next": ["MaaDailyCredit@CreditShop-BuyIt", "MaaDailyCredit@FindRecruitPermit4", "MaaDailyCredit@FindRecruitPermit5", "MaaDailyCredit@FindRecruitPermit6", "MaaDailyCredit@FindRecruitPermit7", "MaaDailyCredit@FindRecruitPermit8", "MaaDailyCredit@FindRecruitPermit9", "MaaDailyCredit@FindRecruitPermit10", "Stop"]
+  },
+  "MaaDailyCredit@FindRecruitPermit4": {
+    "algorithm": "OcrDetect",
+    "text": ["招聘许可"],
+    "roi": [768, 130, 256, 80],
+    "action": "ClickSelf",
+    "postDelay": 500,
+    "next": ["MaaDailyCredit@CreditShop-BuyIt", "MaaDailyCredit@FindRecruitPermit5", "MaaDailyCredit@FindRecruitPermit6", "MaaDailyCredit@FindRecruitPermit7", "MaaDailyCredit@FindRecruitPermit8", "MaaDailyCredit@FindRecruitPermit9", "MaaDailyCredit@FindRecruitPermit10", "Stop"]
+  },
+  "MaaDailyCredit@FindRecruitPermit5": {
+    "algorithm": "OcrDetect",
+    "text": ["招聘许可"],
+    "roi": [1024, 130, 256, 80],
+    "action": "ClickSelf",
+    "postDelay": 500,
+    "next": ["MaaDailyCredit@CreditShop-BuyIt", "MaaDailyCredit@FindRecruitPermit6", "MaaDailyCredit@FindRecruitPermit7", "MaaDailyCredit@FindRecruitPermit8", "MaaDailyCredit@FindRecruitPermit9", "MaaDailyCredit@FindRecruitPermit10", "Stop"]
+  },
+  "MaaDailyCredit@FindRecruitPermit6": {
+    "algorithm": "OcrDetect",
+    "text": ["招聘许可"],
+    "roi": [0, 385, 256, 80],
+    "action": "ClickSelf",
+    "postDelay": 500,
+    "next": ["MaaDailyCredit@CreditShop-BuyIt", "MaaDailyCredit@FindRecruitPermit7", "MaaDailyCredit@FindRecruitPermit8", "MaaDailyCredit@FindRecruitPermit9", "MaaDailyCredit@FindRecruitPermit10", "Stop"]
+  },
+  "MaaDailyCredit@FindRecruitPermit7": {
+    "algorithm": "OcrDetect",
+    "text": ["招聘许可"],
+    "roi": [256, 385, 256, 80],
+    "action": "ClickSelf",
+    "postDelay": 500,
+    "next": ["MaaDailyCredit@CreditShop-BuyIt", "MaaDailyCredit@FindRecruitPermit8", "MaaDailyCredit@FindRecruitPermit9", "MaaDailyCredit@FindRecruitPermit10", "Stop"]
+  },
+  "MaaDailyCredit@FindRecruitPermit8": {
+    "algorithm": "OcrDetect",
+    "text": ["招聘许可"],
+    "roi": [512, 385, 256, 80],
+    "action": "ClickSelf",
+    "postDelay": 500,
+    "next": ["MaaDailyCredit@CreditShop-BuyIt", "MaaDailyCredit@FindRecruitPermit9", "MaaDailyCredit@FindRecruitPermit10", "Stop"]
+  },
+  "MaaDailyCredit@FindRecruitPermit9": {
+    "algorithm": "OcrDetect",
+    "text": ["招聘许可"],
+    "roi": [768, 385, 256, 80],
+    "action": "ClickSelf",
+    "postDelay": 500,
+    "next": ["MaaDailyCredit@CreditShop-BuyIt", "MaaDailyCredit@FindRecruitPermit10", "Stop"]
+  },
+  "MaaDailyCredit@FindRecruitPermit10": {
+    "algorithm": "OcrDetect",
+    "text": ["招聘许可"],
+    "roi": [1024, 385, 256, 80],
+    "action": "ClickSelf",
+    "postDelay": 500,
+    "next": ["MaaDailyCredit@CreditShop-BuyIt", "Stop"]
+  },
+  "MaaDailyCredit@CreditShop-Bought": {
+    "baseTask": "CreditShop-Bought",
+    "template": "CreditShop-Bought.png",
+    "next": [
+      "#self",
+      "MaaDailyCredit@ScanRecruitPermits"
+    ]
+  }
+}

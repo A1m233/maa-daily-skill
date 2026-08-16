@@ -12,6 +12,7 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 - 安装、版本、目录或部分安装判断：读取 [references/install-and-discovery.md](references/install-and-discovery.md)。
 - task、profile、variants、已有文件保护或 dry-run：读取 [references/native-config.md](references/native-config.md)。
 - Windows MuMu、模拟器自带 ADB、实例与端口：读取 [references/mumu-windows.md](references/mumu-windows.md)。
+- Custom 任务、用户资源、局部状态恢复或严格白名单购买：读取 [references/custom-tasks.md](references/custom-tasks.md)。
 - 授权、资源风险、长任务等待和结果分类：读取 [references/safety-and-results.md](references/safety-and-results.md)。
 - 需要一个低风险起点时，复制并按用户偏好修改 [assets/daily.toml](assets/daily.toml)；不要未经 review 原样执行模板。
 
@@ -25,7 +26,7 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 6. **按价值验证。** 当前版本支持且验证有意义时，先用 `maa list` 确认发现，再用 `maa run <task> --dry-run --batch --profile <profile>` 检查解析。明确 dry-run 不连接设备，也不能证明所有 MaaCore 参数或真实任务正确。maa-cli 可能在解析前执行资源热更新；网络错误时先用 verbose 区分更新失败与配置失败，不把二者混报。
 7. **补足必要授权。** 用户已明确要求运行一个已知日常时不要重复机械确认。首次安装、更新、实质修改配置、设备目标不唯一或存在源石等显著资源风险时，先说明影响并取得相应同意。
 8. **执行一次。** 使用当前版本实际支持的命令运行一次 task。让普通非交互命令保持 pending 直到退出、超时、取消或运行时失联；不要用高频 Agent/LLM 轮询观察长任务，也不要因暂时零输出重复启动同一任务。
-9. **基于证据汇报。** 结合退出码、summary、stderr 和日志区分成功、部分完成、正常跳过、配置错误、连接错误和任务错误。记录必要日志路径，但不要把用户日志或设备信息写入 Skill 仓库。
+9. **基于证据汇报。** 结合退出码、summary、stderr 和日志区分成功、部分完成、正常跳过、配置错误、连接错误和任务错误。`Completed` 只说明任务链结束，不自动证明“全部买到”“全部领取”等业务后置条件；涉及购买、领取或资源消耗时补充日志或游戏侧证据。记录必要日志路径，但不要把用户日志或设备信息写入 Skill 仓库。
 
 ## 保持判断空间
 

@@ -1,0 +1,129 @@
+# maa-cli 原生配置与日常 task
+
+## 核验信息
+
+- 最近核验日期：2026-08-17
+- 实测环境：maa-cli 0.7.5，MaaCore 6.16.8
+- 官方来源：[maa-cli 配置](https://docs.maa.plus/en-us/manual/cli/config.html)、[使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
+- 边界：maa-cli 与 MaaCore 参数会演进。以下示例用于理解当前形态，生成真实配置前核对当前帮助和官方任务参数。
+
+## 原生目录
+
+从 `maa dir config --batch` 获得 `<MAA_CONFIG_DIR>`。maa-cli 原生组织为：
+
+```text
+<MAA_CONFIG_DIR>/
+├── profiles/
+│   ├── default.toml
+│   └── <profile>.toml
+└── tasks/
+    ├── maa-daily.toml
+    └── <task>.toml|yaml|json
+```
+
+profile 保存 MaaCore、设备连接和资源选择；task 保存按顺序执行的日常任务。不要把设备地址塞进 task，也不要为本 Skill 再造第二套用户配置格式。
+
+列出可用 task：
+
+```powershell
+maa list --batch
+```
+
+运行文件名为 `maa-daily.toml` 的 task：
+
+```powershell
+maa run maa-daily --batch --profile default
+```
+
+`--batch` 会跳过 task 中的交互提示并使用默认值。只有确认默认值符合用户意图时才使用；不要把 batch 当成自动同意高风险参数。
+
+## 先复用，再创建
+
+1. 列出并读取已有 profile/task。
+2. 用户已有成熟 task 时解释其行为并复用，不强制改名。
+3. 新建时直接写入原生 `tasks` 目录；`maa-daily` 只是建议名称。
+4. 同名文件存在时先读取，判断是否真的需要修改。
+5. 需要修改时展示候选变化并取得与影响相称的授权。
+
+不要扫描或编辑无关文件。不要把用户配置复制进 Skill 仓库。
+
+## 安全修改已有 task
+
+选择当前宿主支持的可靠文件能力，保持这些语义：
+
+- 在同一文件系统准备候选，例如 `maa-daily-candidate.toml`。
+- 备份原文件时使用不会被 maa-cli 当作 task 的扩展名，例如 `maa-daily.toml.bak-<timestamp>`。
+- 对候选运行 list/dry-run；确认通过后再替换精确目标。
+- 替换失败时保留原文件和候选，不用猜测性移动清理扩大损失。
+- 成功后精确删除候选；备份是否保留由用户决定。
+
+临时 `MAA_CONFIG_DIR` 可以用于特殊隔离，但它需要复制必要 profile，并可能与真实配置产生差异，因此不作为默认路径。
+
+## task 形态
+
+TOML task 由有序的 `[[tasks]]` 组成：
+
+```toml
+[[tasks]]
+type = "StartUp"
+params = { client_type = "Official", start_game_enabled = true }
+
+[[tasks]]
+type = "Award"
+params = { award = true, mail = true }
+```
+
+常见日常类型包括 `StartUp`、`Recruit`、`Infrast`、`Mall`、`Award` 和 `Fight`。每种 `params` 属于 MaaCore 任务协议；不要根据字段名字面含义猜值。
+
+task 是否需要 `StartUp` 取决于真实起始界面。2026-08-16 的 Windows + MuMu 实测中，游戏停在黄色 `START` 登录页时直接执行 `Award`，ADB、截图与触控均成功，但 MaaCore 无法从该页开始奖励流程；在前面加入上述 `StartUp` 后，能先进入主界面再完成 `Award`。如果用户明确保持在可识别主界面，可以按实际流程省略；不要把 `StartUp` 机械加到所有局部任务。
+
+`StartUp` 也不是任意界面的通用恢复原语。2026-08-17 实测从信用商店“获得物资”弹窗启动时，`StartUp` 无法识别该局部状态并最终报错。已知流程可能停在结果弹窗或其他业务中间态时，把对应恢复节点放在 Custom 任务入口前部，再进入常规导航；只有确实需要处理客户端未启动、登录页或主页导航时才依赖 `StartUp`。
+
+variants 可以按时间、星期或日期选择参数。只有用户确实需要条件化日常时才引入，避免把简单偏好变成难维护规则。多个 variant 匹配时注意当前 `first`/`merge` 策略。
+
+需要表达关卡优先级时，可以用有序、可能重叠的 weekday variants 配合 `strategy = "merge"`，让后匹配的参数覆盖前值。它表达的是当前日期下的参数选择，不是运行时关卡失败后的 fallback。关卡开放日会变化，实际生成前核对当前游戏与 MaaCore 资料，并从日志确认最终选择的 stage。
+
+`Fight` 的“清理理智”通常表示重复执行到下一次战斗已无法支付，而不是保证余额恰好为零。`medicine = 0`、`stone = 0` 时仍可能打开恢复理智界面后正常关闭；只要没有消耗对应资源且任务按配置停止，不应误报为异常。
+
+`Recruit.times` 是尝试上限，还会受到账号已开放槽位和当前槽位状态限制。配置四次而账号只有三个可用槽位时，实际执行三次属于受容量限制的结果；报告“最多四次”而不是承诺精确完成四次。
+
+`Infrast` 使用 `facility = []`、`drones = "_NotUse"`、`continue_training = false` 在 MaaCore 6.16.8 实测会停留在基建总览并执行批量收取，可领取干员信赖、制造产物和订单，不换班、不使用无人机。这个模式不覆盖线索、疲劳处理等其他基建事务，不要称为“完成全部基建日常”。
+
+## 检查与 dry-run
+
+先确认 task 可发现：
+
+```powershell
+maa list --batch
+```
+
+当前版本支持：
+
+```powershell
+maa run maa-daily --dry-run --batch --profile default
+```
+
+dry-run 的证明边界：
+
+- 能证明 maa-cli 找到了 task/profile，并完成当前解析与装配路径。
+- 不连接模拟器或游戏。
+- 不证明 ADB、截图、识别或触控正常。
+- maa-cli 不静态验证所有 MaaCore task 参数；部分错误只会在运行时出现。
+
+maa-cli 0.7.5 实测可能在进入 dry-run 解析前检查并更新 hot-update 资源。因此 `Network error` 不自动等于 task 解析失败。先增加 `-v`/`-vv`，确认错误发生在资源更新还是 task 装配；如果是代理或网络问题，只对当前命令采用用户允许的临时网络绕行，不修改全局代理设置。
+
+因此报告“配置通过 dry-run”，不要报告“日常已验证成功”。当前版本不支持相同选项时，读取 `maa run --help` 并选择等价的只读检查；不存在等价方式时明确记录验证缺口。
+
+## 个性化信息
+
+只收集会改变当前日常的信息，例如：
+
+- 使用哪个 profile、客户端和明确设备；
+- 是否启动/关闭游戏；
+- 公开招募的刷新、确认和加急策略；
+- 基建换班偏好；
+- 信用商店购买优先级与黑名单；
+- 奖励领取范围；
+- 刷图关卡、次数、理智药和停止条件。
+
+源石始终单独处理：默认禁用，只有用户明确知情同意才配置非零使用。对不确定字段先查当前官方文档，不把过期示例写进用户配置。

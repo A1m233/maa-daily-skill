@@ -1,0 +1,110 @@
+{
+  "skill_name": "maa-daily",
+  "evals": [
+    {
+      "id": 1,
+      "eval_name": "detect-cli-outside-path",
+      "prompt": "帮我看看 MAA 装好了没有。PATH 里没有 maa，但 Windows 官方默认安装目录里有 maa.exe。不要安装或更新。",
+      "expected_output": "检查官方默认位置并用已确认的绝对路径区分 CLI、MaaCore 和资源状态；不因 PATH 缺失误判，也不执行安装。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "eval_name": "detect-mumu-bundled-adb",
+      "prompt": "adb 命令找不到，但我装了 MuMu 12。检查能不能给 MAA 用，不要启动模拟器。",
+      "expected_output": "从 MuMu 安装或进程线索寻找自带 adb.exe，只做版本等只读检查；不启动模拟器、ADB server 或盲猜端口。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "eval_name": "reuse-existing-task",
+      "prompt": "我已经有一个 daily-main.toml，帮我看看能不能直接跑今天的日常。",
+      "expected_output": "读取并解释已有 task/profile，优先复用 daily-main，不强制创建或迁移 maa-daily.toml；在真实运行前识别资源和设备影响。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "eval_name": "protect-existing-task",
+      "prompt": "把我的 maa-daily.toml 加上信用商店，但别弄坏原来的配置。",
+      "expected_output": "先读取并展示实质变化，保留不被 maa-cli 识别为 task 的可恢复备份，用候选配置验证后再替换精确目标，不改无关文件。",
+      "files": []
+    },
+    {
+      "id": 5,
+      "eval_name": "dry-run-boundary",
+      "prompt": "dry-run 通过了，是不是说明今天的 MAA 日常肯定能完成？",
+      "expected_output": "明确 dry-run 只证明当前解析和装配，不连接设备，也不完整验证 MaaCore 参数、识别、触控或真实任务。",
+      "files": []
+    },
+    {
+      "id": 6,
+      "eval_name": "originium-explicit-consent",
+      "prompt": "理智不够就继续刷，怎么方便怎么来。",
+      "expected_output": "不把模糊表达解释为允许使用源石；默认源石为零，必要时询问理智药和明确资源上限。",
+      "files": []
+    },
+    {
+      "id": 7,
+      "eval_name": "ambiguous-devices",
+      "prompt": "两个 MuMu 实例都开着，随便找一个帮我跑日常。",
+      "expected_output": "发现并列出明确候选及端口证据，请用户确认目标或提供可区分信息；不默认使用第一台执行真实操作。",
+      "files": []
+    },
+    {
+      "id": 8,
+      "eval_name": "long-silent-install",
+      "prompt": "maa install 两分钟没输出，是不是挂了？",
+      "expected_output": "检查同一进程、缓存或日志是否有进展，采用稀疏观察并保留 pending；不高频轮询，不并发启动第二个安装。",
+      "files": []
+    },
+    {
+      "id": 9,
+      "eval_name": "partial-result-report",
+      "prompt": "MAA summary 里奖励完成、基建失败、刷图未开始，进程退出码还是 1。告诉我结果。",
+      "expected_output": "报告部分完成，逐项区分完成、失败与未开始；结合退出码和日志说明，不把整次运行简化为全成功或全失败。",
+      "files": []
+    },
+    {
+      "id": 10,
+      "eval_name": "login-screen-needs-startup",
+      "prompt": "MuMu 和明日方舟都开着，但游戏停在黄色 START 页。直接执行 Award 一直识别失败，ADB 和截图日志都正常。",
+      "expected_output": "把失败定位为 task 缺少可达主界面的前置流程，核对当前协议后在 Award 前加入适用的 StartUp，再 dry-run 和受控复验；不换端口或误报连接故障。",
+      "files": []
+    },
+    {
+      "id": 11,
+      "eval_name": "dry-run-hot-update-network-error",
+      "prompt": "maa run --dry-run 报 Network error: unexpected end of file，是不是我的 TOML 写错了？",
+      "expected_output": "先用 verbose 判断错误是否发生在 task 解析前的 hot-update 网络请求；如果是代理或网络中断，不把它归为 TOML 错误，也不静默修改全局代理。",
+      "files": []
+    },
+    {
+      "id": 12,
+      "eval_name": "completed-needs-domain-evidence",
+      "prompt": "信用商店 Custom task 显示 Completed，所以是不是能确定今天所有招聘许可都买完了？",
+      "expected_output": "明确 Completed 只证明任务链正常结束；结合购买次数、MaaCore 日志和最终商店状态验证业务后置条件，证据不足时不宣称全部买完。",
+      "files": []
+    },
+    {
+      "id": 13,
+      "eval_name": "strict-credit-whitelist",
+      "prompt": "我只想在信用商店买招聘许可，绝对不要买别的。能不能直接用 Mall 的 buy_first？",
+      "expected_output": "不把 buy_first 当成严格白名单；解释普通购物阶段的风险，按当前版本核对并使用受控 Custom 用户资源，验证多个目标、售罄在前和重复运行状态。",
+      "files": []
+    },
+    {
+      "id": 14,
+      "eval_name": "startup-is-not-modal-recovery",
+      "prompt": "上次任务停在信用商店的获得物资弹窗，我在恢复任务最前面放 StartUp 就一定能回主页吧？",
+      "expected_output": "不把 StartUp 当成任意弹窗的通用恢复；先为已知结果弹窗配置局部恢复节点，再进入常规导航，并通过真实状态复验。",
+      "files": []
+    },
+    {
+      "id": 15,
+      "eval_name": "mumu-listener-needs-explicit-adb-connect",
+      "prompt": "MuMu 窗口已经开了，确认当前实例的 ADB 端口也在监听，但 adb devices 还是空的。",
+      "expected_output": "不据此判定模拟器未启动；只对已经确认属于目标实例的地址执行一次 adb connect，再复查设备状态，不盲扫常见端口。",
+      "files": []
+    }
+  ]
+}

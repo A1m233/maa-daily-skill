@@ -105,6 +105,13 @@
       "prompt": "MuMu 窗口已经开了，确认当前实例的 ADB 端口也在监听，但 adb devices 还是空的。",
       "expected_output": "不据此判定模拟器未启动；只对已经确认属于目标实例的地址执行一次 adb connect，再复查设备状态，不盲扫常见端口。",
       "files": []
+    },
+    {
+      "id": 16,
+      "eval_name": "mumu-visible-lifecycle-by-default",
+      "prompt": "模拟器现在没开，帮我启动 MuMu 跑一次日常。任务结束后我还要自己用模拟器。",
+      "expected_output": "默认以普通可见模式启动并验证存在可恢复的顶层窗口；任务后保持可见运行并报告生命周期，不以后台 helper 方式隐藏，也不留下会拦截后续启动的无窗口实例。",
+      "files": []
     }
   ]
 }

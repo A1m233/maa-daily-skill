@@ -78,6 +78,14 @@ class SkillContractTests(unittest.TestCase):
         bought = payload["MaaDailyCredit@CreditShop-Bought"]
         self.assertEqual("CreditShop-Bought.png", bought["template"])
 
+    def test_mumu_visibility_lifecycle_is_guarded(self) -> None:
+        skill = SKILL_MD.read_text(encoding="utf-8")
+        reference = (SKILL_ROOT / "references" / "mumu-windows.md").read_text(encoding="utf-8")
+        self.assertIn("默认使用普通可见模式", skill)
+        self.assertIn("不要把它当作普通后台 helper", reference)
+        self.assertIn("shutdown_player", reference)
+        self.assertIn("无可见窗口、再次启动又被旧实例拦截", reference)
+
     def test_eval_contract_is_well_formed(self) -> None:
         payload = json.loads((ROOT / "evals" / "maa-daily.json").read_text(encoding="utf-8"))
         self.assertEqual("maa-daily", payload["skill_name"])

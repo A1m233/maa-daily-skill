@@ -1,0 +1,95 @@
+# maa-daily-skill
+
+一个指导 Agent 使用 [MaaAssistantArknights](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 的 `maa-cli` 配置并运行一次个性化明日方舟日常的 Skill。
+
+它不捆绑 MAA、maa-cli、MaaCore、ADB 或模拟器，也不提供定时和无人值守能力。使用者保留自己的 profile、task、设备信息和运行日志。
+
+## 安装
+
+把仓库中的 [`maa-daily`](./maa-daily) 目录复制到你的 Agent 所使用的 skills 目录，或者使用宿主支持的标准 Skill 安装方式从本仓库安装 `maa-daily`。
+
+安装后的目录应保持：
+
+```text
+<skills-root>/maa-daily/
+├── SKILL.md
+├── agents/openai.yaml
+├── references/
+└── assets/
+```
+
+不同 Agent 的 skills 根目录、审批和命令执行模型不同，请以对应产品说明为准。本项目首版在 Codex 上验证，但 Skill 本身不写死 Codex 专有工具。
+
+## 使用
+
+可以直接告诉 Agent：
+
+```text
+帮我检查这台电脑上的 MAA、MuMu 和 ADB，然后根据我的偏好配置并运行一次日常。
+```
+
+也可以缩小范围：
+
+```text
+只检查 maa-cli 是否完整安装，不要启动模拟器。
+```
+
+```text
+读取我已有的 maa-cli task，告诉我今天执行会做什么，不要运行。
+```
+
+```text
+为 default profile 创建一个不使用源石的日常，先 dry-run，确认后再运行一次。
+```
+
+Skill 会把当前环境证据放在预设示例之前：先读取当前 `--help`、版本、`maa dir`、已有配置和设备状态，再决定哪些指导仍适用。
+
+## 已验证参考
+
+最近核验日期：**2026-08-16**
+
+| 项目 | 实测版本或环境 |
+|---|---|
+| Windows | x64 |
+| maa-cli | 0.7.5 |
+| MaaCore | 6.16.8 |
+| 模拟器 | 明日方舟专版 MuMu 12 |
+| ADB | MuMu 自带 Android Debug Bridge 34.0.1 |
+| Agent | Codex |
+
+这些版本和路径只表示本项目实际踩过并验证过的环境，不是硬版本锁，也不是兼容性矩阵。版本不同仍可参考，但应先核对当前官方文档和运行时行为。
+
+同一环境已完成一次受控真实 smoke：从游戏 `START` 页依次运行 `StartUp` 与保守的 `Award`，两项均完成且进程退出码为 0。该结果证明这条特定路径曾跑通，不承诺其他模拟器、账号状态、客户端版本或日常组合自动兼容。
+
+详细来源和实测边界见 Skill 的 [`references/`](./maa-daily/references)。主要上游入口：
+
+- [maa-cli 安装](https://docs.maa.plus/en-us/manual/cli/install.html)
+- [maa-cli 使用](https://docs.maa.plus/en-us/manual/cli/usage.html)
+- [maa-cli 配置](https://docs.maa.plus/en-us/manual/cli/config.html)
+- [MAA 连接设置](https://docs.maa.plus/zh-cn/manual/connection.html)
+- [MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
+
+## 安全边界
+
+- 不默认使用源石。
+- 不无提示覆盖已有 task/profile。
+- 不把 dry-run 成功当成真实游戏任务成功。
+- 不把 PATH 中缺少 `maa` 或 `adb` 当成软件不存在。
+- 不为了只读问题启动模拟器、连接设备或运行任务。
+- 不处理定时、无人值守、长期后台、多设备或多账号调度。
+
+任何会下载组件、改变用户配置或操作真实游戏的行为，仍服从用户所用 Agent 的审批与命令治理能力。
+
+## 开发验证
+
+仓库测试只使用 Python 标准库，不是 Skill 的运行依赖：
+
+```powershell
+py -3 -m unittest discover -s tests -v
+```
+
+再使用目标 Agent 的 Skill 校验器检查 `maa-daily/`。真实设备 smoke 不属于普通自动化测试，必须在明确的模拟器实例和用户授权下执行。
+
+## 第三方与许可证
+
+本仓库自己的 Skill、文档、模板和测试使用 [MIT License](./LICENSE)。maa-cli、MaaAssistantArknights、MuMu 和其他第三方组件保持各自许可证与使用条款；本仓库不复制或分发它们的二进制、源码和资源。

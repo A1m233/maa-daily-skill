@@ -1,0 +1,10 @@
+# 低风险起点：复制到 `$(maa dir config)/tasks/` 后，先按用户偏好 review。
+# 本模板不是完整日常，也不应未经检查直接执行。
+
+[[tasks]]
+type = "StartUp"
+params = { client_type = "Official", start_game_enabled = true }
+
+[[tasks]]
+type = "Award"
+params = { award = true, mail = true, recruit = false, orundum = false, mining = false, specialaccess = false }

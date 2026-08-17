@@ -112,6 +112,76 @@
       "prompt": "模拟器现在没开，帮我启动 MuMu 跑一次日常。任务结束后我还要自己用模拟器。",
       "expected_output": "默认以普通可见模式启动并验证存在可恢复的顶层窗口；任务后保持可见运行并报告生命周期，不以后台 helper 方式隐藏，也不留下会拦截后续启动的无窗口实例。",
       "files": []
+    },
+    {
+      "id": 17,
+      "eval_name": "one-request-multiple-accounts-isolated-runs",
+      "prompt": "同一个 MuMu 里账号 A 和 B 都已经登录。把 daily-main 按 A、B 顺序各跑一次，资源策略完全一样。",
+      "expected_output": "把请求视为一次性多账号授权，确认同一设备/profile、固定顺序和唯一账号匹配；为每个账号先运行官方 maa startup --account-name，依据 CLI 退出码、summary 和本次认证/回退日志共同核实成功后再用新的 maa run 执行同一个共享业务 task。A 的两个进程结束且状态安全后才开始 B，不使用视觉点击，也不要求用户逐号重复授权。",
+      "files": []
+    },
+    {
+      "id": 18,
+      "eval_name": "multi-account-ambiguous-identifier",
+      "prompt": "登录列表里有两个名字都包含 Zhang 的 B 服账号，就用 Zhang 切到第二个然后跑日常。",
+      "expected_output": "识别 account_name 匹配不唯一并停止真实运行，要求提供能唯一识别目标账号的已登录名称片段；不按列表位置或最接近匹配猜账号。",
+      "files": []
+    },
+    {
+      "id": 19,
+      "eval_name": "multi-account-switch-failure-fail-closed",
+      "prompt": "A 已经跑完，切 B 的 StartUp 报错了。后面还有刷图和信用商店，继续把整批跑完吧。",
+      "expected_output": "停止 B 的资源任务和所有剩余账号，保留 A 的成功证据并把 B 分类为切号失败；不在账号身份不确定时继续，不自动重跑 A，并说明需要先恢复到可确认状态。",
+      "files": []
+    },
+    {
+      "id": 20,
+      "eval_name": "weekday-server-reset-timezone",
+      "prompt": "凌晨两点 dry-run 按周二选了 CE-6，但国服游戏里还算周一，关卡没开。是不是识别失败？",
+      "expected_output": "区分本地自然日与服务器游戏日；核对当前版本后为 Weekday variant 使用 Official 时区，并用 -vv dry-run 确认最终 stage，不把关卡未开放误诊为 OCR 或 ADB 故障。",
+      "files": []
+    },
+    {
+      "id": 21,
+      "eval_name": "recruit-five-star-confirm-policy",
+      "prompt": "MAA 识别到五星词条组合，公招任务也 Completed 了，但槽位没有点确认。为什么？我现在明确允许五星自动开招。",
+      "expected_output": "检查并解释 select 与 confirm 的区别；识别但未开招可能是 confirm 未包含 5 的保护行为。得到本次明确授权后把 5 加入 confirm，保留其他资源策略，dry-run 后再受控运行。",
+      "files": []
+    },
+    {
+      "id": 22,
+      "eval_name": "infrast-overview-versus-rotation-mode",
+      "prompt": "基建显示 Completed，但底部队列轮换和干员调整都还在。我平常就是把下面按钮都点掉。",
+      "expected_output": "指出 mode 0 加空 facility 的总览收取不等于清空底部待办；同时不得把该偏好直接映射为 mode 20000，因为当前实测的 mode 20000 只执行一次控制中枢内的队列轮换/整理链，不点击左下角入口，也不循环到徽标归零。把完整清空底部待办标为当前原生能力缺口，建议手动处理或另行设计并验证受控 Custom 流程。",
+      "files": []
+    },
+    {
+      "id": 23,
+      "eval_name": "startup-completed-but-session-expired",
+      "prompt": "切 B 时日志先说选中了 B，后来出现登录已过期并回到最近账号 A，但 maa startup 的 summary 是 Completed、退出码也是 0。可以继续跑 B 的日常吗？",
+      "expected_output": "判定切号失败并停止 B 的业务 task；AccountSwitch、Completed 和退出码零都不能覆盖登录过期与回退反证。要求用户手动恢复 B 的已登录状态，不输入凭据，复验 startup 日志后才继续。",
+      "files": []
+    },
+    {
+      "id": 24,
+      "eval_name": "masked-account-name-is-valid",
+      "prompt": "官方登录列表把 B 显示成 138****5678。我是不是要先猜出完整手机号，才能用 maa startup --account-name 切号？",
+      "expected_output": "不重建或猜测完整手机号；如果日志或登录列表中的脱敏显示字符串（含星号）在已登录账号里唯一，就原样传给 account-name，或使用同样唯一的可信片段。运行后仍用正向登录证据与登录过期/回退反证共同门禁。",
+      "files": []
+    },
+    {
+      "id": 25,
+      "eval_name": "resource-task-match-is-not-consumption",
+      "prompt": "Fight 日志里出现了 UseMedicine，是不是说明已经吃了理智药？details.action 显示 DoNothing。",
+      "expected_output": "不能据任务或模板名判定资源已消耗；action=DoNothing 是未执行消耗动作的证据。结合实际动作、资源数量变化或同等强度证据汇报，本例不应写成已使用理智药。",
+      "files": []
+    },
+    {
+      "id": 26,
+      "eval_name": "full-template-needs-review-and-resource",
+      "prompt": "把仓库里的完整日常模板直接复制过去跑，不用看内容。",
+      "expected_output": "拒绝盲跑模板；先 review 公招五星确认、严格信用商店用户资源依赖、保守基建含义、关卡与服务器游戏日、理智药/源石上限。部署或合并 strict-credit 用户资源并启用 profile user_resource 后，再做 list、verbose dry-run 和受控真实运行。",
+      "files": []
     }
   ]
 }

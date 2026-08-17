@@ -18,9 +18,11 @@ class SkillContractTests(unittest.TestCase):
             "SKILL.md",
             "agents/openai.yaml",
             "assets/daily.toml",
+            "assets/full-daily.example.toml",
             "references/install-and-discovery.md",
             "references/native-config.md",
             "references/mumu-windows.md",
+            "references/multi-account.md",
             "references/safety-and-results.md",
             "references/custom-tasks.md",
             "assets/strict-credit-recruit-permit/tasks/tasks.json",
@@ -53,10 +55,75 @@ class SkillContractTests(unittest.TestCase):
         self.assertNotIn("stone", params)
         self.assertFalse(params["orundum"])
 
+    def test_full_template_is_valid_and_safe_by_default(self) -> None:
+        path = SKILL_ROOT / "assets" / "full-daily.example.toml"
+        content = path.read_text(encoding="utf-8")
+        parsed = tomllib.loads(content)
+        tasks = parsed["tasks"]
+        self.assertEqual(
+            ["StartUp", "Recruit", "Custom", "Infrast", "Fight", "Award"],
+            [task["type"] for task in tasks],
+        )
+        self.assertEqual("Official", tasks[0]["params"]["client_type"])
+
+        recruit = tasks[1]["params"]
+        self.assertEqual([4, 5], recruit["select"])
+        self.assertEqual([3, 4], recruit["confirm"])
+        self.assertFalse(recruit["expedite"])
+        self.assertEqual(["MaaDailyCredit@MallBegin"], tasks[2]["params"]["task_names"])
+
+        infrast = tasks[3]["params"]
+        self.assertEqual(0, infrast["mode"])
+        self.assertEqual([], infrast["facility"])
+        self.assertEqual("_NotUse", infrast["drones"])
+
+        fight = tasks[4]["params"]
+        self.assertEqual(0, fight["medicine"])
+        self.assertEqual(0, fight["stone"])
+        self.assertIn('timezone = "Official"', content)
+        self.assertNotRegex(content, r"(?i)account_name\s*=")
+        self.assertNotRegex(content, r"[A-Z]:\\")
+
     def test_openai_metadata_invokes_the_skill(self) -> None:
         content = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
         self.assertIn('display_name: "MAA 个性化日常"', content)
         self.assertIn("$maa-daily", content)
+        self.assertIn("多账号", content)
+
+    def test_multi_account_runs_are_isolated_and_fail_closed(self) -> None:
+        skill = SKILL_MD.read_text(encoding="utf-8")
+        reference = (SKILL_ROOT / "references" / "multi-account.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("`maa startup <client> --account-name <唯一登录名>`", skill)
+        self.assertIn("不要用自定义切号 helper、虚构的未匹配账号或视觉点击", skill)
+        self.assertIn("一个已确认设备/profile", reference)
+        self.assertIn("StartUp(A) → 日常(A) → StartUp(B) → 日常(B)", reference)
+        self.assertIn("两个账号通常是四个进程", reference)
+        self.assertIn("不使用 Agent 视觉或 GUI 点击", reference)
+        self.assertIn("停止剩余账号", reference)
+        self.assertIn("登录已过期", reference)
+        self.assertIn("完整 A→B 官方切号与共享业务 task 顺序执行", reference)
+        self.assertIn("带 `****` 的脱敏显示字符串", reference)
+        self.assertIn("身份核验仍是日志证据而非强断言", reference)
+
+    def test_runtime_semantics_guard_known_false_successes(self) -> None:
+        skill = SKILL_MD.read_text(encoding="utf-8")
+        native = (SKILL_ROOT / "references" / "native-config.md").read_text(
+            encoding="utf-8"
+        )
+        safety = (SKILL_ROOT / "references" / "safety-and-results.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('timezone = "Official"', native)
+        self.assertIn("`Recruit.select` 与 `Recruit.confirm` 不是同一个开关", native)
+        self.assertIn("`confirm = [3, 4, 5]`", native)
+        self.assertIn("`mode = 20000`", native)
+        self.assertIn("不是左下角", native)
+        self.assertIn("不能证明能完全表达这一后置条件", native)
+        self.assertIn("`StartUp Completed` 不证明目标账号身份", skill)
+        self.assertIn("登录过期、重新认证或回退到最近账号", safety)
+        self.assertIn('`details.action = "DoNothing"`', safety)
 
     def test_references_have_verification_metadata(self) -> None:
         for path in (SKILL_ROOT / "references").glob("*.md"):
@@ -92,6 +159,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertGreaterEqual(len(payload["evals"]), 8)
         ids = [case["id"] for case in payload["evals"]]
         self.assertEqual(len(ids), len(set(ids)))
+        self.assertTrue({20, 21, 22, 23, 24, 25, 26}.issubset(ids))
         for case in payload["evals"]:
             self.assertTrue(case["prompt"])
             self.assertTrue(case["expected_output"])

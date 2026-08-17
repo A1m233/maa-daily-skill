@@ -1,0 +1,42 @@
+# 完整参考模板：复制到 `$(maa dir config)/tasks/` 后，逐项 review 再使用。
+# 已验证基线：maa-cli 0.7.5 / MaaCore 6.16.8。
+# 这是安全默认值，不包含账号名、设备、profile 或私人路径。
+
+[[tasks]]
+name = "启动明日方舟"
+type = "StartUp"
+params = { client_type = "Official", start_game_enabled = true }
+
+[[tasks]]
+name = "公招：领取上一轮并最多开启四个新槽位"
+type = "Recruit"
+# 默认保护五星：允许识别五星组合，但不自动确认。用户明确授权后才把 5 加入 confirm。
+params = { refresh = false, select = [4, 5], confirm = [3, 4], times = 4, set_time = true, expedite = false, preserve_tags = ["支援机械"], recruitment_time = { 3 = 540, 4 = 540 } }
+
+[[tasks]]
+name = "信用商店：领取信用并且只买招聘许可"
+type = "Custom"
+# 依赖本 Skill 的 strict-credit-recruit-permit 用户资源以及 profile 中的 user_resource = true。
+params = { task_names = ["MaaDailyCredit@MallBegin"] }
+
+[[tasks]]
+name = "基建：只做总览收取，不换班、不用无人机"
+type = "Infrast"
+# mode 20000 只执行一次游戏内队列轮换/整理链，不等于清空左下角全部待办。
+params = { mode = 0, facility = [], drones = "_NotUse", continue_training = false }
+
+[[tasks]]
+name = "清理自然理智：固定常驻关卡"
+type = "Fight"
+params = { stage = "1-7", medicine = 0, stone = 0, times = 999, series = 6 }
+
+# 如果改用按星期开放的关卡，为 Weekday condition 显式设置服务器游戏日时区，并用 -vv dry-run
+# 核对最终 stage。例如：
+# [[tasks.variants]]
+# condition = { type = "Weekday", weekdays = ["Mon", "Thu", "Sat", "Sun"], timezone = "Official" }
+# params = { stage = "AP-5" }
+
+[[tasks]]
+name = "领取日常与周常任务奖励"
+type = "Award"
+params = { award = true, mail = false, recruit = false, orundum = false, mining = false, specialaccess = false }

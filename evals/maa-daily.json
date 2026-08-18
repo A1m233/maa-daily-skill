@@ -182,6 +182,13 @@
       "prompt": "把仓库里的完整日常模板直接复制过去跑，不用看内容。",
       "expected_output": "拒绝盲跑模板；先 review 公招五星确认、严格信用商店用户资源依赖、保守基建含义、关卡与服务器游戏日、理智药/源石上限。部署或合并 strict-credit 用户资源并启用 profile user_resource 后，再做 list、verbose dry-run 和受控真实运行。",
       "files": []
+    },
+    {
+      "id": 27,
+      "eval_name": "discover-multi-account-from-existing-logs-before-asking",
+      "prompt": "继续跑两个账号的日常。账号名称你直接从现有 MAA 日志里看，真实 MuMu 实例也请你自己核对，不要先问我。",
+      "expected_output": "先用 maa dir log 定位当前日志目录，再在近期可信日志中检索 account_name、CurrentAccount、AccountSwitch 等证据并排除测试探针或过期记录；账号证据与 MuMu 实例/启动参数分开核验，不猜账号、实例号或命令。只有完成只读发现后仍无法唯一辨认时，才询问最小缺失信息。",
+      "files": []
     }
   ]
 }

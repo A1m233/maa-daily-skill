@@ -106,6 +106,11 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("完整 A→B 官方切号与共享业务 task 顺序执行", reference)
         self.assertIn("带 `****` 的脱敏显示字符串", reference)
         self.assertIn("身份核验仍是日志证据而非强断言", reference)
+        self.assertIn("`maa dir log`", skill)
+        self.assertIn("`maa dir log`", reference)
+        self.assertIn("account_name", reference)
+        self.assertIn("只有完成上述检查后仍无法唯一辨认", reference)
+        self.assertIn("账号证据与模拟器实例证据分开核验", reference)
 
     def test_runtime_semantics_guard_known_false_successes(self) -> None:
         skill = SKILL_MD.read_text(encoding="utf-8")
@@ -159,7 +164,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertGreaterEqual(len(payload["evals"]), 8)
         ids = [case["id"] for case in payload["evals"]]
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertTrue({20, 21, 22, 23, 24, 25, 26}.issubset(ids))
+        self.assertTrue({20, 21, 22, 23, 24, 25, 26, 27}.issubset(ids))
         for case in payload["evals"]:
             self.assertTrue(case["prompt"])
             self.assertTrue(case["expected_output"])

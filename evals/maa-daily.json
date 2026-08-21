@@ -245,6 +245,27 @@
       "prompt": "MaaCore 日志有 Unknown task: FightSeries-OldMethodFlag，但没有 TaskChainError；AP-5 掉落显示六连完成，FightTimes=6，理智也从 205 变成 25。该说刷图失败还是完全无错误？",
       "expected_output": "两种说法都不准确。保留 Unknown task 内部告警且不猜具体根因，同时根据掉落、FightTimes 和理智变化确认六场刷图业务结果成立；表述为刷图成功但运行存在待诊断告警。若缺少这些后置条件或出现 TaskChainError/SubTaskError，则按失败或结果未知处理。",
       "files": []
+    },
+    {
+      "id": 36,
+      "eval_name": "max-series-bulk-and-remainder-cleanup",
+      "prompt": "同一个关卡单场 12 理智，当前有 943 理智，客户端已确认最多支持十连。我想不吃药、不碎石并尽量用高倍率清完，应该怎么编排？",
+      "expected_output": "统一建模为 N=floor(943/12)=78=7×10+8。先以 series=10、足够大 times、medicine=0、stone=0 跑到不足十连，等待进程终态并从日志确认剩余理智；随后只生成一次 series=8、times=8 的精确补尾，把 Award 放在补尾阶段。不要使用 10→5→1 的稀疏阶梯，也不要静态铺开 10→9→...→1。",
+      "files": []
+    },
+    {
+      "id": 37,
+      "eval_name": "ordinary-sanity-uses-same-remainder-model",
+      "prompt": "普通日常刷 AP-5，单场 30 理智，现在可靠地知道有 183 理智，客户端最大十连。还需要先跑十连探测吗？",
+      "expected_output": "不需要。已有当前账号和当前时点的可靠理智证据时，N=floor(183/30)=6<10，直接运行一次 series=6、times=6，零药零石，结束后再领奖。说明最大倍率探测只在缺少可信当前理智时兼作读取余量入口。",
+      "files": []
+    },
+    {
+      "id": 38,
+      "eval_name": "zero-fight-count-is-not-safe-stop-while-prts-active",
+      "prompt": "FightTimes 还是 times_finished=0，但同一 task 日志已经出现 StartButton2 和 PRTS1。我是不是可以停掉 MAA，改跑另一个补尾 task？",
+      "expected_output": "不能据暂时的 0 次停止并重启补尾；StartButton2/PRTS1 证明战斗在途，应保持原进程 pending 到结算、明确错误、超时、失联或用户要求停止。若用户要求停止，停止 maa-cli 后仍假设游戏内战斗可能继续，先恢复安全界面并重新读取理智，再计算补尾。",
+      "files": []
     }
   ]
 }

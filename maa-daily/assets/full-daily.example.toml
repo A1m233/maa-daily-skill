@@ -28,7 +28,8 @@ params = { mode = 0, facility = [], drones = "_NotUse", continue_training = fals
 [[tasks]]
 name = "清理自然理智：固定常驻关卡"
 type = "Fight"
-params = { stage = "1-7", medicine = 0, stone = 0, times = 999, series = 6 }
+# 单倍是“尽量耗到不足单场”的保守正确基线；高到低倍率阶梯尚待真实 smoke。
+params = { stage = "1-7", medicine = 0, stone = 0, times = 999, series = 1 }
 
 # 如果改用按星期开放的关卡，为 Weekday condition 显式设置服务器游戏日时区，并用 -vv dry-run
 # 核对最终 stage。例如：

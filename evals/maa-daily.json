@@ -189,6 +189,62 @@
       "prompt": "继续跑两个账号的日常。账号名称你直接从现有 MAA 日志里看，真实 MuMu 实例也请你自己核对，不要先问我。",
       "expected_output": "先用 maa dir log 定位当前日志目录，再在近期可信日志中检索 account_name、CurrentAccount、AccountSwitch 等证据并排除测试探针或过期记录；账号证据与 MuMu 实例/启动参数分开核验，不猜账号、实例号或命令。只有完成只读发现后仍无法唯一辨认时，才询问最小缺失信息。",
       "files": []
+    },
+    {
+      "id": 28,
+      "eval_name": "fixed-series-can-complete-with-zero-fights",
+      "prompt": "CE-6 单场 36 理智，我有 205/205。task 配了 times=999、series=6、medicine=0、stone=0，最后 Fight 显示 Completed，但理智还是 205。为什么没有自动改成五连？",
+      "expected_output": "解释 times 是上限而 series=6 是固定倍率，整批需要 216，固定倍率不会按当前理智降档；零恢复预算时任务直接结束。结合 FightTimes.times_finished=0 把结果分类为零战斗正常停止/部分完成，不能写成刷图成功。说明 series=0 AUTO 主要按剩余 times 调倍率，也不是按自然理智选择最大可负担倍率；未经真实 smoke 不把倍率阶梯描述成已验证。",
+      "files": []
+    },
+    {
+      "id": 29,
+      "eval_name": "preexisting-mumu-backend-does-not-satisfy-visible-gate",
+      "prompt": "帮我跑日常，MuMu 默认要在前台。现在 MuMuVMMHeadless 和 ADB 都正常，但没有 MuMuPlayer.exe，窗口句柄也是 0。可以直接跑吗？",
+      "expected_output": "不能直接跑。默认或既有偏好为前台可见时，桌面 shell 与可恢复顶层窗口是真实执行门禁；只有后端和 ADB 应判为前台壳缺失，而不是模拟器已正常打开。暂停日常；若恢复窗口需要有序关闭现有实例，先说明会终止其中游戏并取得授权，再普通可见启动和复核窗口。",
+      "files": []
+    },
+    {
+      "id": 30,
+      "eval_name": "custom-completed-with-missing-namespaced-template",
+      "prompt": "严格信用 Custom 显示 Completed，但 MaaCore 日志有 templ not found MaaDailyCredit@CrisisPopup.png，也没有任何购买按钮或购买结果动作。能说招聘许可已经买完吗？",
+      "expected_output": "不能。把 namespaced baseTask 未显式继承模板识别为已知资源缺口；Completed 不能覆盖内部 ERR，也没有购买后置条件证据。报告信用流程继续到了扫描但购买结果未成立，保留错误；修复时显式指定基础模板并在真实领取信用结果弹窗状态复验。",
+      "files": []
+    },
+    {
+      "id": 31,
+      "eval_name": "mumu-visible-relaunch-can-change-adb-port",
+      "prompt": "MuMu 0 号实例恢复前一直用 127.0.0.1:16384。现在重新可见启动后旧地址 offline，但 MuMuManager info -v 0 报 adb_port=16385。profile 还照旧跑可以吗？",
+      "expected_output": "不能沿用旧地址。实例编号不变也不保证端口不变；以当前管理器对已确认实例报告的端口为主，只连接 16385，并用 adb devices/get-state、可见窗口和进程隔离复核。备份后更新目标 profile，再 dry-run/真实运行；不盲扫常见端口，也不让旧后端监听覆盖当前实例证据。",
+      "files": []
+    },
+    {
+      "id": 32,
+      "eval_name": "startup-hot-update-fails-before-account-switch",
+      "prompt": "maa startup 只打印 Updating hot update files...，随后 Network error: unexpected end of file；这次 asst.log 没新增。是不是 B 账号切换失败？",
+      "expected_output": "不是账号切换失败：错误发生在 maa-cli 热更新前置阶段，本次 MaaCore/AccountSwitch 根本未开始。分类为 CLI 更新网络失败、业务未开始；保持可见窗口、ADB 和进程隔离门后可做一次有界重试，同因复现则停止调查更新源。",
+      "files": []
+    },
+    {
+      "id": 33,
+      "eval_name": "validated-bulk-then-single-fight-cleanup",
+      "prompt": "CE-6 单场 36、账号上限 205，想尽量省进入次数又不吃药、不碎石。series=6 已验证会零战斗，怎么配？",
+      "expected_output": "可为这个已知成本与理智上限使用两个官方 Fight task：先 series=5、较大 times、medicine=0、stone=0 批量，再对同关卡 series=1 兜底。说明实测 205 先消耗 180 后剩 25，第二段实际 0 场；高倍率必须按关卡成本和账号理智选择，不能当作通用模板，最终仍核对两段 FightTimes 和资源 action。",
+      "files": []
+    },
+    {
+      "id": 34,
+      "eval_name": "mumu-window-exists-but-android-launch-failed",
+      "prompt": "MuMuPlayer 窗口已经出来了，manager 却显示 is_android_started=false、launch_err_code 非零，没有 headless、ADB 端口或 device；VBox.log 还有 Windows error 1455 和 VERR_UNRESOLVED_ERROR。可以直接让 MAA 连吗？",
+      "expected_output": "不能。把它分类为前台壳已打开但虚拟机启动失败；窗口不是 Android/ADB 成功证据。读取管理器与本次 MuMu/VBox 日志并核对内存、虚拟内存和页面文件。若这是当前工作流刚启动且游戏实际未运行的失败实例，可有序关闭后做一次有限重试，并重新验证窗口、Android 状态、后端和 ADB；同因复现则停止，不自动改页面文件或关闭用户其他程序。",
+      "files": []
+    },
+    {
+      "id": 35,
+      "eval_name": "internal-err-with-proven-business-postcondition",
+      "prompt": "MaaCore 日志有 Unknown task: FightSeries-OldMethodFlag，但没有 TaskChainError；AP-5 掉落显示六连完成，FightTimes=6，理智也从 205 变成 25。该说刷图失败还是完全无错误？",
+      "expected_output": "两种说法都不准确。保留 Unknown task 内部告警且不猜具体根因，同时根据掉落、FightTimes 和理智变化确认六场刷图业务结果成立；表述为刷图成功但运行存在待诊断告警。若缺少这些后置条件或出现 TaskChainError/SubTaskError，则按失败或结果未知处理。",
+      "files": []
     }
   ]
 }

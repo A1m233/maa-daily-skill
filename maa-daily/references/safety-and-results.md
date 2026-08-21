@@ -2,7 +2,7 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-08-18
+- 最近核验日期：2026-08-21
 - 实测环境：maa-cli 0.7.5，MaaCore 6.16.8，Windows + MuMu 12
 - 官方来源：[maa-cli 使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[配置说明](https://docs.maa.plus/en-us/manual/cli/config.html)、[MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
 - 边界：本页给出 Agent 行为原则，不替代宿主自己的审批、沙箱、超时和取消策略。
@@ -81,6 +81,8 @@
 
 退出码、summary 和日志矛盾时采用保守结论，明确指出冲突。不要为了把结果变成“成功”而连续换端口、重跑整个日常或发出猜测性补偿操作。
 
+maa-cli 自身的热更新可能先于 MaaCore 连接。若 CLI 只输出 `Updating hot update files...` 后以网络 EOF 等错误退出，本次 MaaCore 日志没有新增、账号切换事件也不存在，应分类为“CLI 更新网络失败，业务任务未开始”，而不是切号、ADB 或游戏网络失败。保持窗口、ADB 与进程隔离门后允许一次有界重试；同一前置网络错误再次出现时停止并调查更新源，不把重试成功改写成首次没有失败。
+
 ### `Completed` 不等于业务后置条件成立
 
 MaaCore 的 `Completed` 或 maa-cli summary 中的完成状态，首先表示对应任务链正常结束。它不自动证明用户描述的领域目标已经全部满足，例如：
@@ -88,6 +90,7 @@ MaaCore 的 `Completed` 或 maa-cli summary 中的完成状态，首先表示对
 - 商店中所有目标商品都已购买；
 - 所有可领取奖励都已领取；
 - 理智恰好降到零；
+- Fight 实际开始过至少一场战斗；
 - 请求的公招次数都存在可用槽位并已执行。
 - `StartUp` 最终停留在用户要求的目标账号；
 - 基建界面中未被当前 mode 覆盖的队列轮换、干员调整或其他底部待办都已处理。
@@ -97,6 +100,12 @@ MaaCore 的 `Completed` 或 maa-cli summary 中的完成状态，首先表示对
 多账号时，`StartUp Completed` 与进程退出码零只是门禁的一部分：本次日志若包含登录过期、重新认证或回退到最近账号，就必须覆盖表面成功并判为切号失败。公招时同时核对 `select`/`confirm`：识别到高星组合但未点击确认可能是配置保护而非识别失败。基建时同时核对所选 `mode`：空 `facility` 的总览收取与 `mode = 20000` 的一次游戏内轮换/整理链不是同一行为，后者也不证明左下角待办已经清空。
 
 资源日志也要核对动作字段，而不是只看任务名。2026-08-18 的真实 Fight smoke 中，日志出现 `UseMedicine` 任务/模板但 `details.action = "DoNothing"`，实际没有使用理智药；因此“匹配过资源节点”不能写成“已消耗资源”。只有动作、资源数量变化或其他同等强度证据才能证明实际消耗。
+
+固定连战倍率还可能让 Fight 零战斗结束。2026-08-19 实测中，`series = 6` 把 CE-6 的整批消耗算成 216，而当前理智为 205；`FightTimes.times_finished = 0` 后任务仍汇总为 `Completed`。报告“刷图完成”前至少核对实际完成次数或掉落证据；零次应写成正常跳过/部分完成，并说明倍率、当前理智和整批消耗。
+
+Custom 流程内部的资源错误也可能不升级为 task chain error。例如 namespaced 模板缺失时，日志可记录 `templ not found`，后续分支仍继续并汇总 `Completed`。检查严格购买任务时同时搜索 MaaCore 的 `ERR`、购买按钮/结果节点和最终扫描，不把 summary 覆盖内部错误。
+
+其他内部 `ERR` 也要按证据分层。2026-08-21 的双账号 AP-5 运行中，MaaCore 多次记录 `Unknown task: FightSeries-OldMethodFlag`，但两个账号都存在 AP-5 六连掉落、`FightTimes.times_finished = 6` 和理智 205→25 的一致后置条件，且没有 `TaskChainError`/`SubTaskError`。因此不能仅凭一条内部 ERR 把已证明的战斗结果改写为失败，也不能因业务成功就宣称运行无错误。保留告警、报告已经成立的业务结果，并把具体根因保持为待诊断；缺少后置条件或出现 task chain 错误时仍按失败或结果未知处理。
 
 局部任务失败后再运行恢复任务时，保留原失败证据。后续恢复成功不能把前序运行改写成从未失败；按实际影响报告“部分完成并恢复”或“结果仍不确定”。
 

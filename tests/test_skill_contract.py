@@ -80,6 +80,7 @@ class SkillContractTests(unittest.TestCase):
         fight = tasks[4]["params"]
         self.assertEqual(0, fight["medicine"])
         self.assertEqual(0, fight["stone"])
+        self.assertEqual(1, fight["series"])
         self.assertIn('timezone = "Official"', content)
         self.assertNotRegex(content, r"(?i)account_name\s*=")
         self.assertNotRegex(content, r"[A-Z]:\\")
@@ -129,6 +130,16 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("`StartUp Completed` 不证明目标账号身份", skill)
         self.assertIn("登录过期、重新认证或回退到最近账号", safety)
         self.assertIn('`details.action = "DoNothing"`', safety)
+        self.assertIn("`FightTimes.times_finished = 0`", native)
+        self.assertIn("`series = 0` 的官方 AUTO", native)
+        self.assertIn("它不是“按当前自然理智选择最大可负担倍率”", native)
+        self.assertIn("高倍率 Fight + 同关卡单倍 Fight", native)
+        self.assertIn("两个账号最终均为 25/205", native)
+        self.assertIn("双账号完整日常又验证了 AP-5", native)
+        self.assertIn("`Fight Completed` 也不证明实际开战过", skill)
+        self.assertIn("零战斗结束", safety)
+        self.assertIn("CLI 更新网络失败，业务任务未开始", safety)
+        self.assertIn("Unknown task: FightSeries-OldMethodFlag", safety)
 
     def test_references_have_verification_metadata(self) -> None:
         for path in (SKILL_ROOT / "references").glob("*.md"):
@@ -149,14 +160,28 @@ class SkillContractTests(unittest.TestCase):
             self.assertEqual("ClickSelf", task["action"])
         bought = payload["MaaDailyCredit@CreditShop-Bought"]
         self.assertEqual("CreditShop-Bought.png", bought["template"])
+        custom_reference = (
+            SKILL_ROOT / "references" / "custom-tasks.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("当前捆绑资源有一个已确认的待修缺口", custom_reference)
+        self.assertIn("templ not found MaaDailyCredit@CrisisPopup.png", custom_reference)
+        self.assertIn("`CreditShop-BuyIt` → `CreditShop-Bought`", custom_reference)
 
     def test_mumu_visibility_lifecycle_is_guarded(self) -> None:
         skill = SKILL_MD.read_text(encoding="utf-8")
         reference = (SKILL_ROOT / "references" / "mumu-windows.md").read_text(encoding="utf-8")
-        self.assertIn("默认使用普通可见模式", skill)
+        self.assertIn("默认或既有偏好是前台可见", skill)
         self.assertIn("不要把它当作普通后台 helper", reference)
-        self.assertIn("shutdown_player", reference)
+        self.assertIn("control -v 0 shutdown", reference)
+        self.assertIn("control -v 0 launch", reference)
+        self.assertIn("`info -v 0`", reference)
+        self.assertIn("ADB 端口不变", reference)
+        self.assertIn("Windows error 1455", reference)
+        self.assertIn("前台壳已打开，但虚拟机启动失败", reference)
+        self.assertIn("不自动调整系统页面文件", reference)
         self.assertIn("无可见窗口、再次启动又被旧实例拦截", reference)
+        self.assertIn("启动成功至少区分四层证据", reference)
+        self.assertIn("后端实例运行但前台壳缺失", reference)
 
     def test_eval_contract_is_well_formed(self) -> None:
         payload = json.loads((ROOT / "evals" / "maa-daily.json").read_text(encoding="utf-8"))
@@ -164,7 +189,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertGreaterEqual(len(payload["evals"]), 8)
         ids = [case["id"] for case in payload["evals"]]
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertTrue({20, 21, 22, 23, 24, 25, 26, 27}.issubset(ids))
+        self.assertTrue({20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35}.issubset(ids))
         for case in payload["evals"]:
             self.assertTrue(case["prompt"])
             self.assertTrue(case["expected_output"])

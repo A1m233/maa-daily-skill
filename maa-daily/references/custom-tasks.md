@@ -2,7 +2,7 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-08-17
+- 最近核验日期：2026-08-21
 - 实测环境：maa-cli 0.7.5，MaaCore 6.16.8，国服信用商店，1280×720 归一化界面
 - 官方来源：[任务流水线协议](https://docs.maa.plus/en-us/protocol/task-schema.html)、[maa-cli 配置](https://docs.maa.plus/en-us/manual/cli/config.html)
 - 边界：本页记录可复用的 Custom/ProcessTask 语义和一次真实界面方案，不承诺其他客户端、分辨率或未来版本保持相同布局。
@@ -29,7 +29,7 @@ user_resource = true
 
 这些行为有版本演进可能。配置与运行现象冲突时，先读取当前任务流水线协议和 MaaCore 日志，不用重复点击掩盖不确定性。
 
-## 严格只买招聘许可的已验证示例
+## 严格只买招聘许可的受控示例
 
 [assets/strict-credit-recruit-permit/tasks/tasks.json](../assets/strict-credit-recruit-permit/tasks/tasks.json) 提供一份可选用户资源。它按 1280×720 信用商店的 5×2 商品槽位分别 OCR：
 
@@ -58,3 +58,5 @@ params = { task_names = ["MaaDailyCredit@MallBegin"] }
 - 先在可观察环境验证零目标、多个目标、售罄在前和重复运行状态。
 
 运行后不能只凭 Custom `Completed` 断言“全部买完”。核对每次购买、最终扫描结果与游戏侧商店状态；证据不足时按 [安全授权与结果解释](safety-and-results.md) 保守报告。
+
+当前捆绑资源有一个已确认的待修缺口：`MaaDailyCredit@CrisisPopup` 只声明了 `baseTask = "CrisisPopup"`，没有显式指定 `template = "CrisisPopup.png"`。2026-08-19 的两个真实账号运行都记录 `templ not found MaaDailyCredit@CrisisPopup.png`，随后跳到许可扫描并把 Custom 汇总为 `Completed`。2026-08-21 的双账号运行仍出现相同错误，但后续日志分别记录了 1 次和 2 次完整的 `CreditShop-BuyIt` → `CreditShop-Bought`，证明该错误不一定阻断后续购买，也不能被购买成功反向解释为流程无错误。报告时同时保留内部错误与每次已成立的购买后置条件；修复并复验前，不把当前资源描述为无已知缺口。

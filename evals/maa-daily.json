@@ -266,6 +266,20 @@
       "prompt": "FightTimes 还是 times_finished=0，但同一 task 日志已经出现 StartButton2 和 PRTS1。我是不是可以停掉 MAA，改跑另一个补尾 task？",
       "expected_output": "不能据暂时的 0 次停止并重启补尾；StartButton2/PRTS1 证明战斗在途，应保持原进程 pending 到结算、明确错误、超时、失联或用户要求停止。若用户要求停止，停止 maa-cli 后仍假设游戏内战斗可能继续，先恢复安全界面并重新读取理智，再计算补尾。",
       "files": []
+    },
+    {
+      "id": 39,
+      "eval_name": "maa-pre-core-stall-across-execution-contexts",
+      "prompt": "某个命令执行上下文里 adb devices 能看到目标模拟器，但 maa startup 五分钟没有输出，本次 MaaCore 日志也完全没新增，原进程是否真的结束还不确定。宿主还提供另一个可能访问桌面会话的执行上下文。可以直接在那里再启动一次吗？",
+      "expected_output": "不能直接重复启动，也不能归因为切号或游戏识别失败。先把它分类为尚未进入 MaaCore 的执行前停滞，确认原进程终态；分别核验拟用上下文对目标 profile、资源、更新网络、ADB 和必要桌面会话的可达性。只有原进程不会重叠且新上下文已证明满足条件时，才在既有授权内做一次有界重试；同因复现或终态不明则停止并报告。",
+      "files": []
+    },
+    {
+      "id": 40,
+      "eval_name": "account-switch-recovers-inside-one-startup",
+      "prompt": "同一个 maa startup 日志先出现 AccountSwitchTask SubTaskError 和 Login failed，随后 MaaCore 自己重启客户端；最后一轮重新选中目标账号、完成登录并到达主页，进程最终 Completed。应该再开一个 startup 确认吗？",
+      "expected_output": "不另开 startup；这是原进程内部恢复。按最后一轮证据确认目标账号且没有登录过期、重新认证或回退反证时，报告内部重试后切号成功并保留前序错误，再进入独立业务进程。若最后一轮身份不能独立闭环，则按身份不确定停止，不能把失败轮和成功轮的零散证据拼成成功。",
+      "files": []
     }
   ]
 }

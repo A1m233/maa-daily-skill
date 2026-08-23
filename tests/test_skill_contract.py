@@ -196,10 +196,28 @@ class SkillContractTests(unittest.TestCase):
         self.assertGreaterEqual(len(payload["evals"]), 8)
         ids = [case["id"] for case in payload["evals"]]
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertTrue({20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35}.issubset(ids))
+        self.assertTrue({20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40}.issubset(ids))
         for case in payload["evals"]:
             self.assertTrue(case["prompt"])
             self.assertTrue(case["expected_output"])
+
+    def test_execution_context_guidance_is_host_agnostic(self) -> None:
+        skill = SKILL_MD.read_text(encoding="utf-8")
+        safety = (SKILL_ROOT / "references" / "safety-and-results.md").read_text(
+            encoding="utf-8"
+        )
+        multi = (SKILL_ROOT / "references" / "multi-account.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("另一个上下文里的只读 ADB 成功不能替代这一门禁", skill)
+        self.assertIn("尚未进入 MaaCore 的执行前停滞", safety)
+        self.assertIn("原进程不会与新进程重叠", safety)
+        self.assertIn("内部重试后切号成功", multi)
+        self.assertIn("不得把跨轮次拼接出的零散证据", multi)
+        for product_specific in ("agent-friend", "host_user", "windowsRestrictedToken"):
+            self.assertNotIn(product_specific, skill)
+            self.assertNotIn(product_specific, safety)
+            self.assertNotIn(product_specific, multi)
 
     def test_public_files_do_not_contain_private_workflow_or_user_paths(self) -> None:
         forbidden = (

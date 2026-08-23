@@ -280,6 +280,27 @@
       "prompt": "同一个 maa startup 日志先出现 AccountSwitchTask SubTaskError 和 Login failed，随后 MaaCore 自己重启客户端；最后一轮重新选中目标账号、完成登录并到达主页，进程最终 Completed。应该再开一个 startup 确认吗？",
       "expected_output": "不另开 startup；这是原进程内部恢复。按最后一轮证据确认目标账号且没有登录过期、重新认证或回退反证时，报告内部重试后切号成功并保留前序错误，再进入独立业务进程。若最后一轮身份不能独立闭环，则按身份不确定停止，不能把失败轮和成功轮的零散证据拼成成功。",
       "files": []
+    },
+    {
+      "id": 41,
+      "eval_name": "expiring-medicine-zero-fight-is-resource-progress",
+      "prompt": "AP-5 单场 30 理智，当前 58。原生 Fight 使用 series=10、medicine=0、medicine_expire_days=1、stone=0；终态日志显示 UseMedicine is_expiring=true、inventory=1、use=1，理智变为 138，但 FightTimes=0 且任务 Completed。下一步怎么处理？",
+      "expected_output": "把资源结果与战斗结果分开：一份目标临期药已实际消耗，但十连战斗为 0，不能称为刷图成功或整轮无动作。基于终态理智计算 floor(138/30)=4；确认目标临期药范围已清空后，以 series=4、times=4 且所有恢复预算为 0 做一次精确补尾，并单独报告最终 FightTimes 和理智。",
+      "files": []
+    },
+    {
+      "id": 42,
+      "eval_name": "native-task-outpaces-convenience-fight-command",
+      "prompt": "当前 maa fight --help 只写 series 最大 6，并显示一个旧的临期药入口；官方 MaaCore 协议写了 series 可到 10 和 medicine_expire_days，原生 task dry-run 也接受它们。应该断言 CLI 不支持十连吗？",
+      "expected_output": "不能把便捷子命令的帮助外推成原生 task 的能力。把它记录为当前版本两个配置表面的差异，分别核对便捷命令帮助、官方协议和原生 task dry-run；便捷命令无法完整表达时使用最小的一次性原生 task，并从真实日志验证运行时接受情况，不宣称所有版本都存在该差异。",
+      "files": []
+    },
+    {
+      "id": 43,
+      "eval_name": "series-auto-contract-needs-runtime-smoke",
+      "prompt": "当前官方协议说 series=0 的 AUTO 会先选最大可用倍率，理智不够最大倍率时选最小可用倍率。是否立刻删掉最大倍率批量加精确余数补尾的编排，全部改成 AUTO？",
+      "expected_output": "先把 AUTO 的当前官方契约更新准确，但在真实 smoke 验证它与临期药、恢复预算和精确余数的组合行为前，不把它描述成已验证的完整替代方案。继续保留已经跑通的固定最大倍率批量、等待终态、读取余量和一次精确补尾流程，并把 AUTO 标记为待验证的简化候选。",
+      "files": []
     }
   ]
 }

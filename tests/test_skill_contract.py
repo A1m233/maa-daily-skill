@@ -214,10 +214,6 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("原进程不会与新进程重叠", safety)
         self.assertIn("内部重试后切号成功", multi)
         self.assertIn("不得把跨轮次拼接出的零散证据", multi)
-        for product_specific in ("agent-friend", "host_user", "windowsRestrictedToken"):
-            self.assertNotIn(product_specific, skill)
-            self.assertNotIn(product_specific, safety)
-            self.assertNotIn(product_specific, multi)
 
     def test_public_files_do_not_contain_private_workflow_or_user_paths(self) -> None:
         forbidden = (

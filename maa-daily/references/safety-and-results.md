@@ -2,7 +2,7 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-08-24
+- 最近核验日期：2026-08-27
 - 实测环境：maa-cli 0.7.5，MaaCore 6.16.8，Windows + MuMu 12
 - 官方来源：[maa-cli 使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[配置说明](https://docs.maa.plus/en-us/manual/cli/config.html)、[MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
 - 边界：本页给出 Agent 行为原则，不替代宿主自己的审批、沙箱、超时和取消策略。
@@ -59,6 +59,33 @@
 
 这些判断描述运行时能力，不绑定某个 Agent、权限模式或沙箱实现。宿主如何授权、取消和报告进程状态，仍以当前公开工具的实际结果为准。
 
+## 真实进程的薄 runner
+
+当前宿主能运行 Python 时，用 Skill 自带的 `scripts/run_with_evidence.py` 单独包裹每个真实 `maa startup` / `maa run` 进程。runner 不获得额外授权，也不改变 task、profile、设备或账号目标；它只在同一个执行上下文中运行原命令并收集证据边界。
+
+```text
+python <skill-root>/scripts/run_with_evidence.py \
+  --report-file <本地临时目录>/<账号别名>-<阶段>.json \
+  -- maa startup Official --account-name <唯一登录名> --profile <profile> --batch
+
+python <skill-root>/scripts/run_with_evidence.py \
+  --report-file <本地临时目录>/<账号别名>-business.json \
+  -- maa run <task> --profile <profile> --batch
+```
+
+runner 使用待执行命令的同一个 `maa` 可执行文件调用 `maa dir log --batch`，在运行前后记录 `asst.log` 的文件大小和行号，再输出以 `MAA_EVIDENCE_JSON=` 开头的单行 JSON。只有当前环境已经证明 MaaCore 日志位于另一个精确路径时，才使用 `--core-log <path>` 覆盖自动发现；不要把示例或旧会话路径写死。
+
+报告只保留可复核的非业务结论：
+
+- 子进程与 wrapper 的退出码；
+- 本次新增日志的起止行、日志是否缺失、未变化或发生轮换；
+- `TaskChainStart`、`TaskChainCompleted`、`TaskChainError`、`SubTaskError` 的次数和行号；
+- MaaCore `ERR` / `CRT` 行号，以及 `SubTaskExtraInfo.what` 的类型计数。
+
+runner 不保存完整命令参数或完整日志副本，`business_result` 固定为 `not_evaluated`。这意味着 runner 的零退出码仍不证明账号、购买、领取、招募、基建或资源消耗等后置条件成立；Agent 必须按报告给出的本轮日志范围继续核对相关业务证据。
+
+退出行为保持 fail-closed：子进程非零时保留其退出码；子进程为零但没有取得可界定的新 MaaCore 日志时返回 `74`；子进程为零但本轮存在 `TaskChainError` 或 `SubTaskError` 时返回 `75`。任一非零结果都停止同一多账号批次的后续进程；若宿主只把非零码统一显示为普通失败，精确值以报告中的 `wrapper_exit_code` 为准。报告只写本地临时或调试目录，文件名使用账号别名，不写入 Skill 仓库，也不包含账号标识。
+
 ## 等待长命令
 
 安装、资源更新和完整日常可能数分钟没有输出：
@@ -113,6 +140,8 @@ MaaCore 的 `Completed` 或 maa-cli summary 中的完成状态，首先表示对
 - 基建界面中未被当前 mode 覆盖的队列轮换、干员调整或其他底部待办都已处理。
 
 对于购买、领取、确认招募或消耗资源等有状态影响的任务，至少核对一项能证明业务后置条件的额外证据：与本次运行对应的 MaaCore 日志、购买/领取次数、明确的最终界面或用户可接受的游戏侧状态。若只能确认任务链结束，应克制地报告“任务链完成，业务结果未完全核验”。
+
+`Award` 日志中的 `ReceiveAward` 点击可以证明本轮执行了领取动作，但不记录该批奖励的具体物品名称，也不能单独证明某件物品的背包增量。可以据此报告“已领取当时可领取的日常/周常奖励”；只有同时存在物品级日志、库存变化或其他等强度证据时，才确认某张券、某种货币或某件材料已经入账。
 
 多账号时，`StartUp Completed` 与进程退出码零只是门禁的一部分：本次日志若包含登录过期、重新认证或回退到最近账号，就必须覆盖表面成功并判为切号失败。公招时同时核对 `select`/`confirm`：识别到高星组合但未点击确认可能是配置保护而非识别失败。基建时同时核对所选 `mode`：空 `facility` 的总览收取与 `mode = 20000` 的一次游戏内轮换/整理链不是同一行为，后者也不证明左下角待办已经清空。
 

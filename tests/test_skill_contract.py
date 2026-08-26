@@ -17,6 +17,7 @@ class SkillContractTests(unittest.TestCase):
         expected = {
             "SKILL.md",
             "agents/openai.yaml",
+            "scripts/run_with_evidence.py",
             "assets/daily.toml",
             "assets/full-daily.example.toml",
             "references/install-and-discovery.md",
@@ -39,7 +40,10 @@ class SkillContractTests(unittest.TestCase):
         self.assertTrue(content.startswith("---\nname: maa-daily\n"))
         self.assertRegex(content, r"(?m)^description: .+MAA.+$")
 
-        links = re.findall(r"\[[^]]+\]\((references/[^)]+|assets/[^)]+)\)", content)
+        links = re.findall(
+            r"\[[^]]+\]\((references/[^)]+|assets/[^)]+|scripts/[^)]+)\)",
+            content,
+        )
         self.assertGreaterEqual(len(links), 5)
         for relative in links:
             self.assertTrue((SKILL_ROOT / relative).is_file(), relative)

@@ -2,7 +2,7 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-08-24
+- 最近核验日期：2026-08-27
 - 实测环境：maa-cli 0.7.5，MaaCore 6.16.8
 - 官方来源：[maa-cli 配置](https://docs.maa.plus/en-us/manual/cli/config.html)、[使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
 - 边界：maa-cli 与 MaaCore 参数会演进。以下示例用于理解当前形态，生成真实配置前核对当前帮助和官方任务参数。
@@ -80,6 +80,24 @@ task 是否需要 `StartUp` 取决于真实起始界面。2026-08-16 的 Windows
 `StartUp` 也不是任意界面的通用恢复原语。2026-08-17 实测从信用商店“获得物资”弹窗启动时，`StartUp` 无法识别该局部状态并最终报错。已知流程可能停在结果弹窗或其他业务中间态时，把对应恢复节点放在 Custom 任务入口前部，再进入常规导航；只有确实需要处理客户端未启动、登录页或主页导航时才依赖 `StartUp`。
 
 variants 可以按时间、星期或日期选择参数。只有用户确实需要条件化日常时才引入，避免把简单偏好变成难维护规则。多个 variant 匹配时注意当前 `first`/`merge` 策略。
+
+定义了 `variants` 的 task 在没有任何 variant 匹配时会被跳过；顶层 `params` 是匹配后的公共参数，不是零匹配时的默认分支。需要“其他情况使用默认参数”时，显式增加一个不带 `condition` 的 variant。使用 `strategy = "merge"` 表达覆盖优先级时，把无条件默认 variant 放在有条件 variant 之前，并只在其中写默认分支特有的字段；药物、源石和次数等公共安全参数继续放在顶层，避免以后需要同步修改两份。例如：
+
+```toml
+[[tasks]]
+type = "Fight"
+strategy = "merge"
+params = { medicine = 0, stone = 0, times = 999 }
+
+[[tasks.variants]]
+params = { stage = "LS-6", series = 5 }
+
+[[tasks.variants]]
+condition = { type = "Weekday", weekdays = ["Tue"], timezone = "Official" }
+params = { stage = "CE-6", series = 5 }
+```
+
+2026-08-27 的 maa-cli 0.7.5 dry-run 复现了这条边界：仅在顶层写 `stage = "LS-6"`、两个 weekday variant 都不匹配时，整个 Fight 不会装配；增加无条件 variant 后，同一 Official 游戏日会装配为 LS-6。验证按星期运行的 task 时，当前日期的 dry-run 只证明当前分支；还应静态检查所有预期游戏日都有匹配路径，不把一次 dry-run 外推成整周覆盖。
 
 `Weekday` 条件默认按运行机器的本地自然日判断。对国服等凌晨才完成游戏日换日的客户端，本地日期在 `00:00` 到游戏换日前可能已经进入下一天，而关卡仍按前一游戏日开放。当前基线应在这类 variant 上显式使用 `timezone = "Official"`，并用 `-vv` dry-run 核对合并后最终选中的 `stage`。2026-08-18 凌晨实测中，缺少该字段会把仍处于周一游戏日的客户端按周二选择关卡，导致导航失败；不要把它误诊为 OCR 或 ADB 故障。
 

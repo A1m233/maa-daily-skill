@@ -2,7 +2,7 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-08-27
+- 最近核验日期：2026-08-29
 - 实测环境：maa-cli 0.7.5，MaaCore 6.16.8
 - 官方来源：[maa-cli 配置](https://docs.maa.plus/en-us/manual/cli/config.html)、[使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
 - 边界：maa-cli 与 MaaCore 参数会演进。以下示例用于理解当前形态，生成真实配置前核对当前帮助和官方任务参数。
@@ -102,6 +102,19 @@ params = { stage = "CE-6", series = 5 }
 `Weekday` 条件默认按运行机器的本地自然日判断。对国服等凌晨才完成游戏日换日的客户端，本地日期在 `00:00` 到游戏换日前可能已经进入下一天，而关卡仍按前一游戏日开放。当前基线应在这类 variant 上显式使用 `timezone = "Official"`，并用 `-vv` dry-run 核对合并后最终选中的 `stage`。2026-08-18 凌晨实测中，缺少该字段会把仍处于周一游戏日的客户端按周二选择关卡，导致导航失败；不要把它误诊为 OCR 或 ADB 故障。
 
 需要表达关卡优先级时，可以用有序、可能重叠的 weekday variants 配合 `strategy = "merge"`，让后匹配的参数覆盖前值。它表达的是当前日期下的参数选择，不是运行时关卡失败后的 fallback。关卡开放日会变化，实际生成前核对当前游戏与 MaaCore 资料，并从日志确认最终选择的 stage。
+
+### 剿灭选关的显式语义
+
+`Fight.stage` 的剿灭值不是普通关卡简称，当前官方协议要求使用完整值：
+
+- `Annihilation`：进入当前剿灭；它不会主动切换到一张已解锁代理的固定地图，而是依赖各账号当时的游戏内选图和代理状态。
+- `Chernobog@Annihilation`：切尔诺伯格。
+- `LungmenOutskirts@Annihilation`：龙门外环。
+- `LungmenDowntown@Annihilation`：龙门市区。
+
+不要从资源中的 namespaced 节点自行去掉 `@Annihilation`；maa-cli 0.7.5 / MaaCore 6.16.8 的 dry-run 会把 `LungmenDowntown` 拒绝为未知 task，而完整值可以正常装配。使用固定多账号列表共享同一 task 时，只有已经确认每个账号在同一明确地图完成 400 杀并拥有可用代理记录，才选择对应的固定值；否则不要用裸 `Annihilation` 掩盖账号间的选图差异，应先补足状态证据或让用户选择。
+
+2026-08-29 的国服双账号真实 smoke 使用 `LungmenDowntown@Annihilation`：两个账号都由 MAA 打开剿灭切换菜单、OCR 选中“龙门市区”，各完成 6 次结算并达到周上限。这个结果验证的是该固定账号集合与当时资源，不代表其它账号天然具备同一代理记录。
 
 `Fight` 的“清理理智”通常表示重复执行到下一次战斗已无法支付，而不是保证余额恰好为零。`medicine = 0`、`stone = 0` 时仍可能打开恢复理智界面后正常关闭；只要没有消耗对应资源且任务按配置停止，不应误报为异常。
 

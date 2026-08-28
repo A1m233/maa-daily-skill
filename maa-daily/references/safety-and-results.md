@@ -2,7 +2,7 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-08-27
+- 最近核验日期：2026-08-29
 - 实测环境：maa-cli 0.7.5，MaaCore 6.16.8，Windows + MuMu 12
 - 官方来源：[maa-cli 使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[配置说明](https://docs.maa.plus/en-us/manual/cli/config.html)、[MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
 - 边界：本页给出 Agent 行为原则，不替代宿主自己的审批、沙箱、超时和取消策略。
@@ -142,6 +142,14 @@ MaaCore 的 `Completed` 或 maa-cli summary 中的完成状态，首先表示对
 对于购买、领取、确认招募或消耗资源等有状态影响的任务，至少核对一项能证明业务后置条件的额外证据：与本次运行对应的 MaaCore 日志、购买/领取次数、明确的最终界面或用户可接受的游戏侧状态。若只能确认任务链结束，应克制地报告“任务链完成，业务结果未完全核验”。
 
 `Award` 日志中的 `ReceiveAward` 点击可以证明本轮执行了领取动作，但不记录该批奖励的具体物品名称，也不能单独证明某件物品的背包增量。可以据此报告“已领取当时可领取的日常/周常奖励”；只有同时存在物品级日志、库存变化或其他等强度证据时，才确认某张券、某种货币或某件材料已经入账。
+
+### 剿灭导航与结算证据
+
+剿灭导航中命中 `Annihilation@UnableToAgent2`，可以确认 MAA 到达的当前关卡没有呈现可用或已激活的代理状态，并因此无法继续；它不能单独区分该关卡尚未完成 400 杀、代理记录无效或其它游戏侧状态。不要仅凭这个模板断言“剿灭券用完”“周上限已满”或某个唯一根因；同时核对本轮 `stage`、显式选图节点、普通/全权代理节点和周进度证据。
+
+周上限以同一运行边界内 `StageDrops.details.annihilation_weekly_process = [current, limit]` 和 `Annihilation weekly limit reached, stop task` 为直接证据。最后一次结算可能只补足剩余合成玉，并通过 `AP_GAMEPLAY` 返还部分理智；计算最终理智时保留这项返还，再结合 `SanityBeforeStage` 与 `FightTimes.times_finished` 核对实际结算次数。
+
+`UsePrts-Annihilation` 的点击次数也不是剿灭券消耗张数：全权委托可能在进入时已经激活，MaaCore 日志不会记录券库存变化。没有库存前后值或同等强度证据时，可以报告“走过全权/代理路径并完成 N 次结算”，不能精确确认消耗了 N 张券。2026-08-29 的双账号 smoke 中，两个账号均有 6 次剿灭结算和 `1800/1800` 周进度，但只有其中一个账号记录了本轮点击全权委托按钮，验证了这一区分。
 
 多账号时，`StartUp Completed` 与进程退出码零只是门禁的一部分：本次日志若包含登录过期、重新认证或回退到最近账号，就必须覆盖表面成功并判为切号失败。公招时同时核对 `select`/`confirm`：识别到高星组合但未点击确认可能是配置保护而非识别失败。基建时同时核对所选 `mode`：空 `facility` 的总览收取与 `mode = 20000` 的一次游戏内轮换/整理链不是同一行为，后者也不证明左下角待办已经清空。
 

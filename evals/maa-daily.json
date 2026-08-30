@@ -301,6 +301,27 @@
       "prompt": "当前官方协议说 series=0 的 AUTO 会先选最大可用倍率，理智不够最大倍率时选最小可用倍率。是否立刻删掉最大倍率批量加精确余数补尾的编排，全部改成 AUTO？",
       "expected_output": "先把 AUTO 的当前官方契约更新准确，但在真实 smoke 验证它与临期药、恢复预算和精确余数的组合行为前，不把它描述成已验证的完整替代方案。继续保留已经跑通的固定最大倍率批量、等待终态、读取余量和一次精确补尾流程，并把 AUTO 标记为待验证的简化候选。",
       "files": []
+    },
+    {
+      "id": 44,
+      "eval_name": "first-full-daily-selects-baseline-before-writing",
+      "prompt": "这是这台机器第一次配置 MAA，profiles 和 tasks 目录都是空的。请直接帮我创建包含公招、基建、商店、刷图和领奖的完整日常。",
+      "expected_output": "把它识别为首次创建正式完整日常；确认没有可复用的本地成熟 task 后，先读取完整参考模板而不是低风险 smoke 模板，说明所选 baseline、继承项、按用户偏好修改的项目与尚未验证的能力，然后才写入候选 task。",
+      "files": []
+    },
+    {
+      "id": 45,
+      "eval_name": "preflight-reconciliation-blocks-missing-business-requirements",
+      "prompt": "我要求日常领取每日周常奖励、邮件不领，并按 AP-5、CE-6、LS-6 的顺序选择可用关卡。候选 task 的 dry-run 只有 StartUp、Recruit、Infrast、Mall、固定 AP-5 Fight，没有 Award。dry-run 已经成功了，可以开始真跑吗？",
+      "expected_output": "不能开始真实运行。重新读取最终候选并逐项对账：奖励要求因缺少 Award 标记为 missing；固定 AP-5 不等于运行时 AP-5→CE-6→LS-6 fallback，应根据实际可表达能力标为 orchestrated、unsupported 或 missing。先补足并重新验证，不能用 dry-run 成功覆盖业务缺项。",
+      "files": []
+    },
+    {
+      "id": 46,
+      "eval_name": "final-report-separates-one-run-recovery-from-reusable-entrypoint",
+      "prompt": "正式 task 只有 StartUp、Recruit、Infrast、Mall 和十连 Fight。这次十连因理智不足零战斗，后来临时 task 完成六连和 Award。现在能不能汇报正式 task 已经会自动清完理智并领奖，以后直接跑它就行？",
+      "expected_output": "不能。确认本次通过临时补尾完成了六连与领奖，同时重新读取正式持久化 task，指出它仍没有精确补尾和 Award。把本次运行结果与未来可重复入口分开汇报，说明下次实际需要的进程顺序，并把尚未持久化的能力保留为 orchestrated 或 missing，不能宣称正式 task 已闭环。",
+      "files": []
     }
   ]
 }

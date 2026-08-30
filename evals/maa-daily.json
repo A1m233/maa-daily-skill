@@ -322,6 +322,13 @@
       "prompt": "正式 task 只有 StartUp、Recruit、Infrast、Mall 和十连 Fight。这次十连因理智不足零战斗，后来临时 task 完成六连和 Award。现在能不能汇报正式 task 已经会自动清完理智并领奖，以后直接跑它就行？",
       "expected_output": "不能。确认本次通过临时补尾完成了六连与领奖，同时重新读取正式持久化 task，指出它仍没有精确补尾和 Award。把本次运行结果与未来可重复入口分开汇报，说明下次实际需要的进程顺序，并把尚未持久化的能力保留为 orchestrated 或 missing，不能宣称正式 task 已闭环。",
       "files": []
+    },
+    {
+      "id": 47,
+      "eval_name": "explicit-bounded-validation-can-close-resource-unverified-items",
+      "prompt": "业务对账没有 missing，但公招三星刷新和基建队列轮换仍是会改变账号状态的 unverified。现在我明确要求用当前唯一账号真实验证这两项；不用理智药和源石，其它未验证的周一剿灭今天不会触发。可以跑吗？",
+      "expected_output": "可以把当前请求识别为一次有界验证，而不是普通日常授权。执行前确认唯一账号、设备与 profile，列明公招刷新会消耗刷新次数、基建会执行一次轮换及各自停止条件，并确认同一 task 中其它资源动作也已获授权；保持药和源石为零，排除今天不触发的剿灭。用独立证据 runner 执行一次，只根据本轮实际触发和后置条件更新这两个项目，未触发或证据不足的项目仍保持 unverified，授权不延续到未来运行。",
+      "files": []
     }
   ]
 }

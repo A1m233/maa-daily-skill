@@ -2,9 +2,9 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-08-29
+- 最近核验日期：2026-09-01
 - 实测环境：maa-cli 0.7.5，MaaCore 6.16.8
-- 官方来源：[maa-cli 配置](https://docs.maa.plus/en-us/manual/cli/config.html)、[使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
+- 官方来源：[maa-cli 配置](https://docs.maa.plus/en-us/manual/cli/config.html)、[使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)、[MAA 理智作战](https://docs.maa.plus/zh-cn/manual/introduction/combat.html)、[《明日方舟》三周年系统更新说明](https://ak.hypergryph.com/news/2022046448.html)
 - 边界：maa-cli 与 MaaCore 参数会演进。以下示例用于理解当前形态，生成真实配置前核对当前帮助和官方任务参数。
 
 ## 原生目录
@@ -124,9 +124,15 @@ params = { stage = "CE-6", series = 5 }
 - `LungmenOutskirts@Annihilation`：龙门外环。
 - `LungmenDowntown@Annihilation`：龙门市区。
 
-不要从资源中的 namespaced 节点自行去掉 `@Annihilation`；maa-cli 0.7.5 / MaaCore 6.16.8 的 dry-run 会把 `LungmenDowntown` 拒绝为未知 task，而完整值可以正常装配。使用固定多账号列表共享同一 task 时，只有已经确认每个账号在同一明确地图完成 400 杀并拥有可用代理记录，才选择对应的固定值；否则不要用裸 `Annihilation` 掩盖账号间的选图差异，应先补足状态证据或让用户选择。
+剿灭自动化需要分开判断三个状态：
 
-2026-08-29 的国服双账号真实 smoke 使用 `LungmenDowntown@Annihilation`：两个账号都由 MAA 打开剿灭切换菜单、OCR 选中“龙门市区”，各完成 6 次结算并达到周上限。这个结果验证的是该固定账号集合与当时资源，不代表其它账号天然具备同一代理记录。
+1. **无助战历史最高歼灭数**：决定全权委托是否可用以及跳过结算按多少歼灭数计算。全权委托按 400 杀结算，只能证明该历史最高记录成立。
+2. **当前保存的普通代理记录**：扫荡券不足后回退普通代理时实际回放的记录；它不由历史最高歼灭数替代，也不能从一次全权委托结算反推其完整性。
+3. **当前普通代理的回放稳定性**：即使保存的是完整记录，干员状态或作战时序变化也可能使本次回放需要接管；只有真实普通代理运行及其结算证据能验证这条路径。
+
+不要从资源中的 namespaced 节点自行去掉 `@Annihilation`；maa-cli 0.7.5 / MaaCore 6.16.8 的 dry-run 会把 `LungmenDowntown` 拒绝为未知 task，而完整值可以正常装配。使用固定多账号列表共享同一 task 时，先确认每个账号在同一明确地图具有无助战 400 杀历史记录并已解锁全权委托。如果配置次数可能超过有当前库存证据覆盖的扫荡券数量，还必须分别验证每个账号的普通代理能够稳定完成 400 杀；否则将连续清理标为 `unverified`，缩小为扫荡券覆盖范围内的有界运行，或向用户说明当前静态 task 不能保证在券耗尽时自动停止。不要用裸 `Annihilation` 掩盖账号间的选图和代理状态差异。
+
+2026-08-29 的国服双账号真实 smoke 使用 `LungmenDowntown@Annihilation`：两个账号都由 MAA 打开剿灭切换菜单、OCR 选中“龙门市区”，各完成 6 次剿灭结算并达到周上限。这个结果验证了该固定账号集合在当时资源下的显式选图、无助战历史最高记录、跳过结算和周上限停止；现有 smoke 证据没有单独归属并验证券耗尽后的普通代理 400 杀结算，因此不证明任一账号当前保存的普通代理记录能够完成 400 杀，也不代表其它账号天然具备相同状态。
 
 `Fight` 的“清理理智”通常表示重复执行到下一次战斗已无法支付，而不是保证余额恰好为零。`medicine = 0`、`stone = 0` 时仍可能打开恢复理智界面后正常关闭；只要没有消耗对应资源且任务按配置停止，不应误报为异常。
 

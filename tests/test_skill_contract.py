@@ -202,7 +202,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertGreaterEqual(len(payload["evals"]), 8)
         ids = [case["id"] for case in payload["evals"]]
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertTrue(set(range(20, 49)).issubset(ids))
+        self.assertTrue(set(range(20, 50)).issubset(ids))
         for case in payload["evals"]:
             self.assertTrue(case["prompt"])
             self.assertTrue(case["expected_output"])

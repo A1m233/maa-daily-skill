@@ -2,9 +2,9 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-08-31
+- 最近核验日期：2026-09-01
 - 实测环境：maa-cli 0.7.5，MaaCore 6.16.8，Windows + MuMu 12
-- 官方来源：[maa-cli 使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[配置说明](https://docs.maa.plus/en-us/manual/cli/config.html)、[MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
+- 官方来源：[maa-cli 使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[配置说明](https://docs.maa.plus/en-us/manual/cli/config.html)、[MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)、[MAA 理智作战](https://docs.maa.plus/zh-cn/manual/introduction/combat.html)、[《明日方舟》三周年系统更新说明](https://ak.hypergryph.com/news/2022046448.html)
 - 边界：本页给出 Agent 行为原则，不替代宿主自己的审批、沙箱、超时和取消策略。
 
 ## 按实际影响授权
@@ -186,11 +186,15 @@ InfrastNotification -> （没有 InfrastReward） -> InfrastExitReward
 
 ### 剿灭导航与结算证据
 
+全权委托与普通代理是两条不同的证据链。游戏使用无助战历史最高歼灭数决定全权委托资格和跳过结算；因此按 400 杀完成一次或多次全权委托，只能确认历史最高记录和对应结算成立，不能证明当前保存的普通代理记录完整或本次回放稳定。MAA 在运行中不会持续检查扫荡券数量，券不足后可能回退普通代理；若 task 允许这种回退，普通代理前置状态必须单独验证，不能把全权委托 smoke 外推为连续清理已经可靠。
+
 剿灭导航中命中 `Annihilation@UnableToAgent2`，可以确认 MAA 到达的当前关卡没有呈现可用或已激活的代理状态，并因此无法继续；它不能单独区分该关卡尚未完成 400 杀、代理记录无效或其它游戏侧状态。不要仅凭这个模板断言“剿灭券用完”“周上限已满”或某个唯一根因；同时核对本轮 `stage`、显式选图节点、普通/全权代理节点和周进度证据。
 
 周上限以同一运行边界内 `StageDrops.details.annihilation_weekly_process = [current, limit]` 和 `Annihilation weekly limit reached, stop task` 为直接证据。最后一次结算可能只补足剩余合成玉，并通过 `AP_GAMEPLAY` 返还部分理智；计算最终理智时保留这项返还，再结合 `SanityBeforeStage` 与 `FightTimes.times_finished` 核对实际结算次数。
 
 `UsePrts-Annihilation` 的点击次数也不是剿灭券消耗张数：全权委托可能在进入时已经激活，MaaCore 日志不会记录券库存变化。没有库存前后值或同等强度证据时，可以报告“走过全权/代理路径并完成 N 次结算”，不能精确确认消耗了 N 张券。2026-08-29 的双账号 smoke 中，两个账号均有 6 次剿灭结算和 `1800/1800` 周进度，但只有其中一个账号记录了本轮点击全权委托按钮，验证了这一区分。
+
+普通代理开始后，重复出现 `Fight@PRTS1` 或 `BattleOfficiallyBegin` 只说明 MaaCore 仍能匹配战斗中标志，不等于击杀数或代理流程仍在推进。若同一运行长时间只重复该识别，没有新的阶段、结算、掉落或 `FightTimes` 进展，并且游戏侧出现代理结束、代理异常或等待接管等状态，应判为在途战斗停滞，而不是继续把它当成长时间剿灭等待。不要假设点击接管后 MAA 能继续自动完成；按用户授权停止 maa-cli 后，将账号标为需要恢复，确认实际战斗和理智状态，再决定人工处理、改用有可靠普通代理的关卡或限制为扫荡券覆盖的运行。
 
 多账号时，`StartUp Completed` 与进程退出码零只是门禁的一部分：本次日志若包含登录过期、重新认证或回退到最近账号，就必须覆盖表面成功并判为切号失败。公招时同时核对 `select`/`confirm`：识别到高星组合但未点击确认可能是配置保护而非识别失败。基建时同时核对所选 `mode`：空 `facility` 的总览收取与 `mode = 20000` 的一次游戏内轮换/整理链不是同一行为，后者也不证明左下角待办已经清空。
 

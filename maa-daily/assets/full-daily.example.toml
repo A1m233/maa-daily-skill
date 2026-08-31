@@ -25,15 +25,18 @@ type = "Infrast"
 # mode 20000 只执行一次游戏内队列轮换/整理链，不等于清空左下角全部待办。
 params = { mode = 0, facility = [], drones = "_NotUse", continue_training = false }
 
-# 可选的周一剿灭示例，默认保持注释。只有固定账号列表中的每个账号都已在
-# 同一明确地图完成 400 杀并可代理时才启用；不要用裸 `Annihilation`
-# 代替明确选图，因为它依赖每个账号当前的游戏内选择。
+# 可选的周一剿灭有界示例，默认保持注释。全权委托按无助战历史最高歼灭数
+# 结算；扫荡券不足后的普通代理则回放当前保存记录，两者必须分开验证。
+# 只有固定账号列表中的每个账号都已在同一明确地图取得无助战 400 杀并解锁
+# 全权委托时才启用；不要用裸 `Annihilation` 代替明确选图。
+# 默认只示范 1 次，不承诺清满周上限。只有当前扫荡券库存足以覆盖计划次数，
+# 或每个账号的普通代理都已另行真实验证能稳定完成 400 杀时，才扩大 times。
 # [[tasks]]
 # name = "周一优先清理剿灭"
 # type = "Fight"
 # [[tasks.variants]]
 # condition = { type = "Weekday", weekdays = ["Mon"], timezone = "Official" }
-# params = { stage = "LungmenDowntown@Annihilation", medicine = 0, medicine_expire_days = 0, stone = 0, times = 999, series = 1 }
+# params = { stage = "LungmenDowntown@Annihilation", medicine = 0, medicine_expire_days = 0, stone = 0, times = 1, series = 1 }
 
 [[tasks]]
 name = "清理自然理智：固定常驻关卡"

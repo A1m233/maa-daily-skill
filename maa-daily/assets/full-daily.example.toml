@@ -11,7 +11,7 @@ params = { client_type = "Official", start_game_enabled = true }
 name = "公招：领取上一轮并最多开启四个新槽位"
 type = "Recruit"
 # 默认保护五星：允许识别五星组合，但不自动确认。用户明确授权后才把 5 加入 confirm。
-params = { refresh = false, select = [4, 5], confirm = [3, 4], times = 4, set_time = true, expedite = false, preserve_tags = ["支援机械"], recruitment_time = { 3 = 540, 4 = 540 } }
+params = { refresh = true, select = [4, 5], confirm = [3, 4], times = 4, set_time = true, expedite = false, preserve_tags = ["支援机械"], recruitment_time = { 3 = 540, 4 = 540 } }
 
 [[tasks]]
 name = "信用商店：领取信用并且只买招聘许可"

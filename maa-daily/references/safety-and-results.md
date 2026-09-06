@@ -2,7 +2,7 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-09-01
+- 最近核验日期：2026-09-06（补充 Depot 失败与空结果的解释）
 - 实测环境：maa-cli 0.7.5，MaaCore 6.16.8，Windows + MuMu 12
 - 官方来源：[maa-cli 使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[配置说明](https://docs.maa.plus/en-us/manual/cli/config.html)、[MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)、[MAA 理智作战](https://docs.maa.plus/zh-cn/manual/introduction/combat.html)、[《明日方舟》三周年系统更新说明](https://ak.hypergryph.com/news/2022046448.html)
 - 边界：本页给出 Agent 行为原则，不替代宿主自己的审批、沙箱、超时和取消策略。
@@ -161,6 +161,14 @@ MaaCore 的 `Completed` 或 maa-cli summary 中的完成状态，首先表示对
 对于购买、领取、确认招募或消耗资源等有状态影响的任务，至少核对一项能证明业务后置条件的额外证据：与本次运行对应的 MaaCore 日志、购买/领取次数、明确的最终界面或用户可接受的游戏侧状态。若只能确认任务链结束，应克制地报告“任务链完成，业务结果未完全核验”。
 
 `Award` 日志中的 `ReceiveAward` 点击可以证明本轮执行了领取动作，但不记录该批奖励的具体物品名称，也不能单独证明某件物品的背包增量。可以据此报告“已领取当时可领取的日常/周常奖励”；只有同时存在物品级日志、库存变化或其他等强度证据时，才确认某张券、某种货币或某件材料已经入账。
+
+### Depot 库存结果的有效性
+
+按库存计算材料缺口前，核对目标账号本次扫描的任务终态、错误事件与 `DepotInfo` 物品数量。`done = true` 或 `AllTasksCompleted` 不能单独证明扫描成功；空对象、缺少目标物品条目也不能直接解释为零库存。只有成功扫描的覆盖范围与输出语义足以证明目标数量时，才据此计算缺口。
+
+2026-09-05 的一次失败运行同时返回 `DepotInfo` 的 `data = "{}"`、`done = true`，并出现 `TaskChainError`，进程退出码为 1。这种结果应保留为“库存未知”，不能用于推算缺口或自动生成补刷次数；它也不能证明账号确实没有材料。恢复识别或取得用户提供的数量后，再继续依赖库存的计划。
+
+识别失败后的版本与上游修复核查见[安装与环境发现](install-and-discovery.md#识别失败后的版本与修复核查)。
 
 ### 基建收取与轮换的独立后置条件
 

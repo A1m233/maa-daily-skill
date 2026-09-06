@@ -2,7 +2,7 @@
 
 ## 核验信息
 
-- 最近核验日期：2026-08-17
+- 最近核验日期：2026-09-06（补充识别失败后的版本与修复核查；首装实测仍为 2026-08-17）
 - 实测环境：Windows x64，maa-cli 0.7.5，MaaCore 6.16.8
 - 官方来源：[maa-cli 安装](https://docs.maa.plus/en-us/manual/cli/install.html)、[使用说明](https://docs.maa.plus/en-us/manual/cli/usage.html)、[maa-cli 仓库](https://github.com/MaaAssistantArknights/maa-cli)
 - 边界：以下路径、版本、磁盘占用和现象来自一次真实 Windows 首装，是诊断线索而非永久契约。其他平台直接遵循当前官方文档。
@@ -104,6 +104,16 @@ maa install stable --batch --test-time 0
 maa-cli 0.7.5 实测在 `maa run`（包括 `--dry-run`）进入 task 解析前可能访问 `api.maa.plus` 更新 hot-update 资源。本机代理提前断开连接时，命令会报告 `Network error: unexpected end of file`，此时不能据此断言 task/profile 有错。
 
 使用 `-v` 或 `-vv` 分层观察：如果日志停在 `Updating hot update files` 和 HTTP 请求阶段，先处理网络路径；如果已经打印 task summary 或 MaaCore 装配错误，再按配置问题处理。需要绕过有问题的代理时，只为当前 maa-cli 子进程临时移除代理环境变量，并取得与网络变化相称的用户同意；不要静默修改系统或持久代理配置。
+
+## 识别失败后的版本与修复核查
+
+已经连接设备，但识别或导航持续失败时，先从本次日志定位最后成功动作与首个失败节点。结合匹配结果、实际动作和后续状态判断；模板名出现在日志中不代表它匹配失败，入口点击成功也不能代替进入目标页面的证据。
+
+核对本次实际加载的 MaaCore 版本、基础资源与热更新资源路径，再对照官方发布说明或修复代码，查找与失败节点对应的已知问题。maa-cli、MaaCore 与资源分别核验；`Hot update completed successfully` 不能证明 MaaCore 和全部基础资源已经更新，也不能把 Skill 的实测版本当成应永久保留的版本。
+
+发现本地尚未包含的对应修复时，优先考虑按当前官方流程更新相关组件，再复验原来失败的任务。更新与真实复验按[实际影响授权](safety-and-results.md#按实际影响授权)，已有授权足够时直接继续。更新后核对新日志实际加载的版本、资源与业务结果；官方已修复或更新命令成功，都不能单独证明本机问题已经解决。没有对应修复证据时继续定位，不把所有识别失败都变成强制升级。
+
+2026-09-05 的一次 Depot 运行使用 MaaCore 6.16.8：主题入口匹配并点击成功，后续仓库页签识别失败；[官方 v6.17.1 发布说明](https://github.com/MaaAssistantArknights/MaaAssistantArknights/releases/tag/v6.17.1) 已记录游戏新增页签后的对应识别修复。这支持先核查版本与修复，而非仅凭主题模板名断言未适配；该次失败证据不包含更新后的成功复验，也不构成固定最低版本要求。
 
 ## Windows 日志文件
 

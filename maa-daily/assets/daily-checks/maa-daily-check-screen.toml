@@ -1,0 +1,4 @@
+# 仅 OCR 当前页面，供检查原型诊断；不导航、不点击。
+[[tasks]]
+type = "Custom"
+params = { task_names = ["MaaDailyCheck@ScreenText"] }

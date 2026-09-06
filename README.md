@@ -14,7 +14,7 @@
 <skills-root>/maa-daily/
 ├── SKILL.md
 ├── agents/openai.yaml
-├── scripts/run_with_evidence.py
+├── scripts/
 ├── references/
 └── assets/
 ```
@@ -67,6 +67,8 @@ Skill 会把当前环境证据放在预设示例之前：先读取当前 `--help
 同一环境已完成受控真实 smoke：除 `StartUp` 和保守 `Award` 外，还覆盖了公招容量与高星确认策略、信用商店严格白名单购买、基建总览收取与原生队列轮换、按服务器游戏日选择关卡、不使用理智药/源石的停止行为、多账号登录态过期时的失败关闭、登录态有效时完整 A→B 官方切号、最大倍率批量后按剩余理智精确补尾、临期药已消耗但十连零战斗后的精确补尾，以及薄 runner 对独立真实进程的退出状态和 MaaCore 日志边界采集。该结果证明这些特定路径曾跑通，也暴露并固化了 `Completed`、在途 Fight、资源动作、Custom 任务与 Windows 日志的边界；不承诺其他模拟器、账号状态、客户端版本、分辨率或日常组合自动兼容。
 
 详细来源和实测边界见 Skill 的 [`references/`](./maa-daily/references)。主要上游入口：
+
+创建任务从[创建指南](./maa-daily/references/create-task.md)进入。清体力计算和奖励收尾见[日常检查组件](./maa-daily/references/daily-checks.md)：`reward_check.py scan` 通过 MaaCore 扫描已验证的国服十档列表、跨屏去重并输出合成玉/扫荡券提醒。它是最终 Award 后的独立检查，不领取奖励；其它布局或证据不完整时返回未知。计算器可离线使用，理智读取的实测边界见组件说明。
 
 - [maa-cli 安装](https://docs.maa.plus/en-us/manual/cli/install.html)
 - [maa-cli 使用](https://docs.maa.plus/en-us/manual/cli/usage.html)

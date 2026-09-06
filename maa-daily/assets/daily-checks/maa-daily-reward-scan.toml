@@ -1,0 +1,4 @@
+# 起点：已登录账号的任务页。只选择日常页并滚动识别，不领取。
+[[tasks]]
+type = "Custom"
+params = { task_names = ["MaaDailyCheck@RewardScan"] }

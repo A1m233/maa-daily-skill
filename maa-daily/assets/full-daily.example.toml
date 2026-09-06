@@ -41,7 +41,8 @@ params = { mode = 0, facility = [], drones = "_NotUse", continue_training = fals
 [[tasks]]
 name = "清理自然理智：固定常驻关卡"
 type = "Fight"
-# 单倍是“尽量耗到不足单场”的保守正确基线；高到低倍率阶梯尚待真实 smoke。
+# 单倍保留为无需动态编排的保守基线；先读 references/daily-checks.md 复用高倍率计算。
+# 识别原型未验证前不要直接替换本链；芯片等材料目标不默认清空理智。
 params = { stage = "1-7", medicine = 0, stone = 0, times = 999, series = 1 }
 
 # 如果改用按星期开放的关卡，为 Weekday condition 显式设置服务器游戏日时区，并用 -vv dry-run
@@ -53,4 +54,5 @@ params = { stage = "1-7", medicine = 0, stone = 0, times = 999, series = 1 }
 [[tasks]]
 name = "领取日常与周常任务奖励"
 type = "Award"
+# Completed 不证明每日合成玉/扫荡券已领。Agent 仍须按 safety-and-results.md 收尾核验并提醒。
 params = { award = true, mail = false, recruit = false, orundum = false, mining = false, specialaccess = false }

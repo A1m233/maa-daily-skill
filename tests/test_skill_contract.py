@@ -18,6 +18,16 @@ class SkillContractTests(unittest.TestCase):
             "SKILL.md",
             "agents/openai.yaml",
             "scripts/run_with_evidence.py",
+            "scripts/daily_checks.py",
+            "scripts/reward_check.py",
+            "scripts/infrast_check.py",
+            "references/create-task.md",
+            "references/daily-checks.md",
+            "assets/daily-checks/tasks.json",
+            "assets/daily-checks/maa-daily-check-sanity.toml",
+            "assets/daily-checks/maa-daily-check-rewards.toml",
+            "assets/daily-checks/maa-daily-check-screen.toml",
+            "assets/daily-checks/maa-daily-reward-scan.toml",
             "assets/daily.toml",
             "assets/full-daily.example.toml",
             "references/install-and-discovery.md",
@@ -46,7 +56,7 @@ class SkillContractTests(unittest.TestCase):
         )
         self.assertGreaterEqual(len(links), 5)
         for relative in links:
-            self.assertTrue((SKILL_ROOT / relative).is_file(), relative)
+            self.assertTrue((SKILL_ROOT / relative.split("#", 1)[0]).is_file(), relative)
 
     def test_template_is_valid_toml_and_conservative(self) -> None:
         template = (SKILL_ROOT / "assets" / "daily.toml").read_bytes()

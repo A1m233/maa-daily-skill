@@ -216,6 +216,7 @@ def _collect_evidence(
     base.update(
         {
             "state": "bounded",
+            "interval_sha256": hashlib.sha256(appended).hexdigest(),
             "start_line": start_line,
             "end_line": start_line + max(len(appended.splitlines()) - 1, 0),
         }

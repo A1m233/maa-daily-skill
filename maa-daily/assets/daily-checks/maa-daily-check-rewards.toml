@@ -1,0 +1,4 @@
+# 原型：从任务页切到每日页并采集 OCR；不领取，不证明目标奖励已入账。
+[[tasks]]
+type = "Custom"
+params = { task_names = ["MaaDailyCheck@DailyPage"] }

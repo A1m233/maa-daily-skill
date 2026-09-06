@@ -1,0 +1,10 @@
+{
+  "provenance": "2026-09-07 CN client, MaaCore 6.17.1. Only completed-label vertical centers projected from real MaaCore OCR; no account/log data. Original samples have one top and two bottom observations. Tests synthesize the additional top repeat required by the new scan protocol.",
+  "samples": [
+    {"claimed": 1, "top": [], "bottom": [663], "bottom_repeat": [663]},
+    {"claimed": 7, "top": [421, 509.5, 599.5, 687], "bottom": [130, 219, 307.5, 396.5, 486, 573, 663], "bottom_repeat": [130, 219, 307.5, 396.5, 486, 573, 663]},
+    {"claimed": 8, "top": [332, 421, 509.5, 598.5, 686.5], "bottom": [130, 219, 307.5, 396.5, 486, 572, 663], "bottom_repeat": [130, 219, 307.5, 396.5, 486, 572, 663]},
+    {"claimed": 9, "top": [244, 332, 421, 509.5, 598.5, 687], "bottom": [130, 219, 307.5, 396.5, 486.5, 572, 663], "bottom_repeat": [130, 219, 307.5, 396.5, 486.5, 572, 663]},
+    {"claimed": 10, "top": [153.5, 244, 332, 421, 509.5, 598.5, 686.5], "bottom": [130, 219, 307.5, 396.5, 486, 573, 663], "bottom_repeat": [130, 219, 307.5, 396.5, 486, 573, 663]}
+  ]
+}

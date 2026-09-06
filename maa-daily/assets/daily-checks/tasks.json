@@ -1,0 +1,88 @@
+{
+  "MaaDailyCheck@RewardScan": {
+    "algorithm": "OcrDetect", "text": ["日常任务"], "roi": [480, 0, 800, 65],
+    "action": "ClickSelf", "postDelay": 1200, "next": ["MaaDailyCheck@RewardTopReset"], "maxTimes": 1
+  },
+  "MaaDailyCheck@RewardTopReset": {
+    "algorithm": "JustReturn", "action": "Swipe", "specificRect": [180, 190, 10, 10],
+    "rectMove": [180, 650, 10, 10], "specialParams": [500, 0, 1, 1], "postDelay": 800,
+    "next": ["MaaDailyCheck@RewardTopA"]
+  },
+  "MaaDailyCheck@RewardTopA": {
+    "algorithm": "OcrDetect", "action": "DoNothing", "text": [], "roi": [0, 75, 390, 645],
+    "next": ["MaaDailyCheck@RewardTopRepeat"]
+  },
+  "MaaDailyCheck@RewardTopRepeat": {
+    "baseTask": "MaaDailyCheck@RewardTopReset", "next": ["MaaDailyCheck@RewardTopB"]
+  },
+  "MaaDailyCheck@RewardTopB": {
+    "baseTask": "MaaDailyCheck@RewardTopA", "next": ["MaaDailyCheck@RewardBottomReset"]
+  },
+  "MaaDailyCheck@RewardBottomReset": {
+    "algorithm": "JustReturn", "action": "Swipe", "specificRect": [190, 600, 10, 10],
+    "rectMove": [190, 180, 10, 10], "specialParams": [500, 0, 1, 1], "postDelay": 1000,
+    "next": ["MaaDailyCheck@RewardBottomA"]
+  },
+  "MaaDailyCheck@RewardBottomA": {
+    "baseTask": "MaaDailyCheck@RewardTopA", "next": ["MaaDailyCheck@RewardBottomRepeat"]
+  },
+  "MaaDailyCheck@RewardBottomRepeat": {
+    "baseTask": "MaaDailyCheck@RewardBottomReset", "next": ["MaaDailyCheck@RewardBottomB"]
+  },
+  "MaaDailyCheck@RewardBottomB": {
+    "baseTask": "MaaDailyCheck@RewardTopA", "next": []
+  },
+  "MaaDailyCheck@ScreenText": {
+    "algorithm": "OcrDetect",
+    "action": "DoNothing",
+    "text": [],
+    "roi": [0, 0, 1280, 720],
+    "next": [],
+    "maxTimes": 1
+  },
+  "MaaDailyCheck@StagePage": {
+    "baseTask": "StartButton1",
+    "action": "DoNothing",
+    "sub": [],
+    "reduceOtherTimes": [],
+    "exceededNext": [],
+    "next": ["MaaDailyCheck@Sanity"],
+    "maxTimes": 1
+  },
+  "MaaDailyCheck@Sanity": {
+    "baseTask": "SanityMatch",
+    "algorithm": "OcrDetect",
+    "action": "DoNothing",
+    "text": [],
+    "sub": [],
+    "next": ["MaaDailyCheck@SanityConfirm"],
+    "postDelay": 500,
+    "maxTimes": 1
+  },
+  "MaaDailyCheck@SanityConfirm": {
+    "baseTask": "SanityMatch",
+    "algorithm": "OcrDetect",
+    "action": "DoNothing",
+    "text": [],
+    "sub": [],
+    "next": [],
+    "maxTimes": 1
+  },
+  "MaaDailyCheck@DailyPage": {
+    "baseTask": "DailyTask",
+    "template": "WeeklyTask.png",
+    "action": "ClickSelf",
+    "sub": [],
+    "next": ["MaaDailyCheck@DailyText"],
+    "postDelay": 1200,
+    "maxTimes": 1
+  },
+  "MaaDailyCheck@DailyText": {
+    "algorithm": "OcrDetect",
+    "action": "DoNothing",
+    "text": [],
+    "roi": [0, 0, 1280, 720],
+    "next": [],
+    "maxTimes": 1
+  }
+}

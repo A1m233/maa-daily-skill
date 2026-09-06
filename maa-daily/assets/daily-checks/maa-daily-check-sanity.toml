@@ -1,0 +1,4 @@
+# 原型：仅从已打开的关卡准备页读取理智，不点击开始行动。
+[[tasks]]
+type = "Custom"
+params = { task_names = ["MaaDailyCheck@StagePage"] }

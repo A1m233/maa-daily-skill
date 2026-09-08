@@ -1,6 +1,6 @@
 # 日常检查与清体力组件
 
-- 最近核验日期：2026-09-07
+- 最近核验日期：2026-09-08
 - 官方来源：[流水线协议](https://docs.maa.plus/zh-cn/protocol/task-schema.html)、[FightTimesTaskPlugin v6.17.1](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Task/Fight/FightTimesTaskPlugin.cpp)、[任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
 - 相关实践：[ArknightsAutoHelper 奖励状态识别](https://github.com/ArknightsAutoHelper/ArknightsAutoHelper/blob/master/imgreco/task.py)。只借鉴状态识别思路；发布包不复制其图片或识别代码。
 - 边界：理智读取已通过一个账号关卡准备页的重复实测；奖励计数只覆盖下述已验证的国服十档布局，不代表所有客户端或未来布局。结果是奖励档位状态推断，不是背包增量，也不是任务点数统计。
@@ -15,6 +15,8 @@ python <skill-root>/scripts/daily_checks.py prepare --config-dir <MAA_CONFIG_DIR
 
 这个写入动作需要配置修改授权：合并自带 `assets/daily-checks/tasks.json` 到用户资源，创建理智、奖励页、通用页面 OCR 和完整档位扫描四个原生检查 task。保留其他键，对不一致的同名键/文件拒绝覆盖；用户资源有变化时先保留备份。同一配置根下没有并发写入者时使用，失败后检查输出和备份，不删除整个目录重试。脚本不修改 profile；按现有原生配置启用 `resource.user_resource = true`，不覆盖连接信息。
 
+同时合并 `assets/drain-sanity/tasks.json` 的三个目标关卡确认节点，供[动态清体力候选组件](drain-integration.md)使用；部署这些节点不代表导航或战斗已经通过真实验证。
+
 检查仍通过 maa-cli 和薄 runner 执行：
 
 ```text
@@ -28,6 +30,18 @@ python <skill-root>/scripts/daily_checks.py inspect --report <local>/sanity.json
 - `inspect`：仅读取该 runner 报告的日志字节区间，并校验区间哈希。错误、日志变化、缺少识别结果均不能当作零理智或奖励已领取。报告只放本地，不提交账号页面 OCR。
 
 `daily_checks.py inspect` 只提取单次 OCR/理智，其奖励字段仍为 unknown。不要把这个低层入口当成奖励检查结果；档位计数与提醒使用下面的专用脚本。`AwardFinished` 或 `ReceiveAward` 仍不足以单独证明关键奖励已领取。
+
+## 开跑前的部署预检
+
+在首个账号业务执行前调用，不必先进入游戏任务页：
+
+```text
+python <skill-root>/scripts/reward_check.py --layout cn-daily-ten-v1 preflight --maa <maa-executable>
+```
+
+复用扫描入口的安装校验，只执行同一个 maa-cli 的 `dir config --batch` 并读取该配置根下的扫描 task 与资源，不启动游戏、不扫描、不写文件。退出 0 / `status=installed` 仅证明捆绑扫描资源一致，输出明确保留 `profile_checked=false`、`game_state_checked=false`。退出 2 时读取 stderr 中的缺失/冲突原因；不要用它代替奖励状态。
+
+随后由 Agent 读取本轮实际 profile 确认 `resource.user_resource = true`，并 dry-run `maa-daily-reward-scan`；继承或覆盖配置按原生配置规则核对。需要部署时用上文 `prepare`，再重复预检。扫描时仍会再次校验资源，防止预检后变化。部署授权与不能静默降级的责任由[收尾检查依赖预检](safety-and-results.md#收尾检查依赖预检)维护。
 
 ## 奖励档位：一次调用完成扫描与判定
 
@@ -72,9 +86,15 @@ python <skill-root>/scripts/infrast_check.py inspect --report <本账号本轮�
 
 `action_observed` 只表示动作已执行，子任务 completed 也不证明设施或待办全部处理完。第一版没有游戏侧空状态检查，因此 `all_work_completed` 保持 unknown、`reminder_required` 保持 true；Agent 复用输出，无需每次手动翻日志，只对用户要求且仍未核验的结果补证或提醒。无动作不等于零待办，也不自动判成失败。
 
-退出码 0 表示完成日志分类，不表示基建全完成；2 表示报告不可用、日志缺失/变化、运行错误或没有完整基建链。失败运行中可解析的动作仍保留作部分证据，但不得覆盖失败。`interval_line` 从本报告区间第一行计数；`observed_at` 保留原报告结束时间，不代表重放时的游戏现状。当前适配本机实测回调结构；未知节点、其他语言标签和新版本语义不猜测映射。超过 64 MiB 的单次区间拒绝读取，不回退扫描整个历史日志。
+错误分为 `error_groups.infrast`、`other_chains`、`unassigned`：回调用明确的任务身份归属；普通 ERR/CRT 仅在同一日志进程/线程上有唯一活动任务链时按执行区间归属，不能从错误名称猜测。链外、不同线程或多链歧义的错误保留为未归属告警，不自动归给基建。分组保留行号与归属依据，不将其他任务的错误称为无害。
+
+`status` / 每条链的 `evidence_status` 表示基建动作证据是否可分类；基建自身有错误、回调解析异常或缺少完整基建链时为 unknown。独立的 `run_status` 表示整轮进程是 clean、warnings 或 failed；其他链的错误不抹去有效基建动作，但也不因此消除整轮失败。退出码 0 表示基建日志可分类且整轮进程未失败，不表示基建全完成；2 表示基建证据未知或整轮进程失败。失败运行中可解析的动作仍保留作部分证据，失败隔离规则不变。
+
+`interval_line` 从本报告区间第一行计数；`observed_at` 保留原报告结束时间，不代表重放时的游戏现状。当前适配本机实测回调结构；未知节点、其他语言标签和新版本语义不猜测映射。超过 64 MiB 的单次区间拒绝读取，不回退扫描整个历史日志。
 
 ## 清体力日常
+
+需要把下面的“读取→计算→执行→重读”串成一次调用时，使用[既有任务接入指南](drain-integration.md)中的 `drain_sanity.py`。它目前是限定资源关卡的候选，不自动修改既有 business task，也不把未经 smoke 的导航当成生产能力。
 
 目标是当前授权资源用尽后，余额不足目标关卡单场消耗，不要求余额为零。普通自然理智和用药后的理智使用同一模型；芯片等次数/库存目标只参考本节，不默认清空理智。
 

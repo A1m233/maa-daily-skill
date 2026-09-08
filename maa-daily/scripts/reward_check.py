@@ -188,9 +188,16 @@ def main(argv=None) -> int:
     scan.add_argument("--maa", default="maa")
     scan.add_argument("--profile", required=True)
     scan.add_argument("--output-dir", type=Path, required=True, help="本地报告目录，每次建立独立子目录")
+    preflight = sub.add_parser("preflight", help="只读核对扫描资源部署，不运行游戏；profile 与页面起点仍需另行核验")
+    preflight.add_argument("--maa", default="maa")
     args = parser.parse_args(argv)
     try:
-        if args.command == "scan":
+        if args.command == "preflight":
+            check_install(args.maa)
+            print(json.dumps({"status": "installed", "layout": LAYOUT,
+                              "profile_checked": False, "game_state_checked": False}, ensure_ascii=False))
+            return 0
+        elif args.command == "scan":
             check_install(args.maa)
             args.output_dir.mkdir(parents=True, exist_ok=True)
             run_dir = Path(tempfile.mkdtemp(prefix="reward-scan-", dir=args.output_dir))
@@ -209,7 +216,10 @@ def main(argv=None) -> int:
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result["status"] == "evaluated" else 2
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
-        print(json.dumps(unknown(type(error).__name__), ensure_ascii=False))
+        failure = ({"status": "not_ready", "reason": type(error).__name__,
+                    "profile_checked": False, "game_state_checked": False}
+                   if args.command == "preflight" else unknown(type(error).__name__))
+        print(json.dumps(failure, ensure_ascii=False))
         print(str(error), file=sys.stderr)
         return 2
 

@@ -11,6 +11,7 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 
 - 首次创建或重新整理任务：先读 [references/create-task.md](references/create-task.md)，统一基线、提问与交付流程。
 - 清体力日常的倍率计算、理智预检查与奖励检查组件：读 [references/daily-checks.md](references/daily-checks.md)，复用捆绑脚本/原生 task，不临时手搓；特殊材料目标仅参考算法。
+- 既有 task 接入动态清体力、替换固定批量与单倍补尾：读 [references/drain-integration.md](references/drain-integration.md)。候选脚本含只导航与循环，先按验证边界接入，不直接重跑旧 Fight。
 - 安装、版本、目录或部分安装判断：读取 [references/install-and-discovery.md](references/install-and-discovery.md)。
 - task、profile、variants、已有文件保护或 dry-run：读取 [references/native-config.md](references/native-config.md)。
 - 单设备切号、多个已登录账号依次复用同一 task：读取 [references/multi-account.md](references/multi-account.md)。
@@ -20,6 +21,8 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 - 需要低风险起点时使用 [assets/daily.toml](assets/daily.toml)；需要覆盖常见日常组件的参考时使用 [assets/full-daily.example.toml](assets/full-daily.example.toml)。两者都必须先按用户偏好和当前版本 review，不得未经检查原样执行。
 
 ## 完成一次日常请求
+
+完整日常在首个账号的业务执行前，必须完成[收尾检查依赖预检](references/safety-and-results.md#收尾检查依赖预检)。Skill 更新不等于 MAA 检查资源已部署；缺少依赖时先处理部署与必要授权，不等切号后才发现奖励无法检查。
 
 1. **判断用户意图。** 区分只读检查、首次配置、修改日常、dry-run、单账号执行和单设备多账号依次执行。只追问会改变 task 内容、账号或设备目标、执行顺序或资源风险的信息。
 2. **发现当前环境。** 先使用当前 `maa --help`、`maa version` 和 `maa dir`。命令不在 PATH 时再检查官方默认位置或模拟器目录。分别判断 CLI、MaaCore、配置、profile、ADB、模拟器实例和设备连接，不把部分安装笼统报成“没装”。默认或既有偏好是前台可见时，把桌面模拟器 shell 与可恢复顶层窗口作为真实运行门禁；只有虚拟机后端和 ADB 不算“模拟器已经正常打开”，只有窗口而管理器仍报告 Android 未启动或非零启动错误也不算成功。只有用户本次明确选择后台或隐藏运行时才跳过可见窗口门禁。恢复窗口需要关闭已有实例时，先说明会终止其中游戏并取得对应授权。模拟器发生关闭、重启或实例恢复后，重新从当前管理器/实例证据发现 ADB 端口并校验 profile，不沿用重启前地址。

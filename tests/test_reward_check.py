@@ -1,4 +1,7 @@
 import copy
+import contextlib
+import io
+import shutil
 import hashlib
 import importlib.util
 import json
@@ -112,6 +115,32 @@ class RewardCheckTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     check.check_install("maa")
                 self.assertEqual(1, run.call_count)  # Only directory discovery, never maa run.
+
+    def test_preflight_installed_missing_and_conflicting_resources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            assets = ROOT / "maa-daily/assets/daily-checks"
+            (root / "tasks").mkdir()
+            (root / "resource/tasks").mkdir(parents=True)
+            with patch.object(check.subprocess, "run") as run:
+                run.return_value.stdout = str(root)
+                def invoke():
+                    stdout = io.StringIO()
+                    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+                        code = check.main(["--layout", check.LAYOUT, "preflight", "--maa", "chosen-maa"])
+                    self.assertEqual(run.call_args.args[0], ["chosen-maa", "dir", "config", "--batch"])
+                    return code, json.loads(stdout.getvalue())
+                self.assertEqual(invoke()[0], 2)
+                shutil.copyfile(assets / (check.TASK + ".toml"), root / "tasks" / (check.TASK + ".toml"))
+                shutil.copyfile(assets / "tasks.json", root / "resource/tasks/tasks.json")
+                code, result = invoke()
+                self.assertEqual(code, 0)
+                self.assertEqual(result["status"], "installed")
+                self.assertFalse(result["profile_checked"])
+                self.assertFalse(result["game_state_checked"])
+                (root / "resource/tasks/tasks.json").write_text('{}', encoding="utf-8")
+                self.assertEqual(invoke()[0], 2)
+                self.assertEqual(run.call_count, 3)  # No MAA run or resource writes by preflight.
 
 
 if __name__ == "__main__":

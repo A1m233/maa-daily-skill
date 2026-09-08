@@ -67,10 +67,48 @@ class InfrastTests(unittest.TestCase):
     def test_invalid_hash_and_failed_run(self):
         body = self.chain(event("SubTaskCompleted", "InfrastReward"))
         for mutate in (lambda r: r["evidence"].update(interval_sha256="bad"),
-                       lambda r: r.update(child_exit_code=1),
                        lambda r: r["evidence"].update(state="rotated")):
             self.assertEqual(self.inspect(body, mutate)["status"], "unknown")
-        self.assertEqual(self.inspect(body + "[ERR] failed\n")["status"], "unknown")
+        failed = self.inspect(body, lambda r: r.update(child_exit_code=1))
+        self.assertEqual(failed["run_status"], "failed")
+        self.assertEqual(failed["status"], "evaluated")
+
+    def test_other_chain_and_unassigned_errors_remain_warnings(self):
+        body = "[ERR] preparation failed\n" + self.chain(event("SubTaskCompleted", "InfrastReward"))
+        body += event("TaskChainStart", chain="Fight", taskid=4)
+        body += "[ERR] combat error\n" + event("TaskChainCompleted", chain="Fight", taskid=4)
+        result = self.inspect(body)
+        self.assertEqual(result["status"], "evaluated")
+        self.assertEqual(result["run_status"], "warnings")
+        self.assertEqual(len(result["error_groups"]["other_chains"]), 1)
+        self.assertEqual(len(result["error_groups"]["unassigned"]), 1)
+        self.assertEqual(result["chains"][0]["error_interval_lines"], [])
+        self.assertEqual(result["all_work_completed"], "unknown")
+
+    def test_infrast_error_only_affects_its_own_chain(self):
+        body = self.chain("[ERR] failed\n")
+        body += event("TaskChainStart", taskid=4) + event("TaskChainCompleted", taskid=4)
+        result = self.inspect(body)
+        self.assertEqual(result["status"], "unknown")
+        self.assertEqual(result["reason"], "infrast_has_errors")
+        self.assertEqual(result["chains"][0]["evidence_status"], "unknown")
+        self.assertEqual(result["chains"][1]["evidence_status"], "evaluated")
+
+    def test_other_thread_and_overlapping_chains_not_guessed(self):
+        body = "[P1][T1] " + event("TaskChainStart")
+        body += "[ERR][P1][T2] background error\n"
+        body += "[P1][T1] " + event("TaskChainCompleted")
+        result = self.inspect(body)
+        self.assertEqual(len(result["error_groups"]["unassigned"]), 1)
+        self.assertEqual(result["status"], "evaluated")
+        body = event("TaskChainStart") + event("TaskChainStart", chain="Fight", taskid=4)
+        body += "[ERR] ambiguous\n" + event("SubTaskError", chain="Fight", taskid=4)
+        body += event("TaskChainCompleted", chain="Fight", taskid=4) + event("TaskChainCompleted")
+        result = self.inspect(body)
+        self.assertEqual(len(result["error_groups"]["unassigned"]), 1)
+        self.assertEqual(len(result["error_groups"]["other_chains"]), 1)
+        self.assertEqual(result["run_status"], "failed")
+        self.assertEqual(result["status"], "evaluated")
 
     def test_missing_lifecycle_and_bad_callback(self):
         self.assertEqual(self.inspect(event("TaskChainStart"))["status"], "unknown")

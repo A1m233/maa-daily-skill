@@ -12,6 +12,49 @@ MARKER = "Assistant::append_callback | "
 CATEGORIES = {"可收获": "products", "订单交付": "orders", "干员信赖": "trust"}
 
 
+def classify_errors(lines: list[str]) -> dict:
+    """Attribute raw errors only to a unique active chain on the same log lane.
+
+    Callback identity wins over timing. Pre-chain and other-thread messages
+    stay unassigned; no error-name allowlist or guessing from message text.
+    """
+    active = {}
+    result = {"infrast": [], "other_chains": [], "unassigned": []}
+    task_error = False
+    for number, line in enumerate(lines, 1):
+        lane_match = re.search(r"\[(P[^]]+)\]\[(T[^]]+)\]", line)
+        lane = lane_match.groups() if lane_match else None
+        event, value = None, {}
+        if MARKER in line:
+            event, _, payload = line.split(MARKER, 1)[1].partition(" ")
+            value = json.loads(payload)
+            if not isinstance(value, dict):
+                raise ValueError("callback must be an object")
+        identity = (value.get("taskchain"), value.get("taskid"))
+        identified = isinstance(identity[0], str) and type(identity[1]) is int
+        if event == "TaskChainStart":
+            if not identified or identity in active:
+                raise ValueError("ambiguous chain lifecycle")
+            active[identity] = lane
+        callback_error = event in {"TaskChainError", "SubTaskError"}
+        if callback_error or re.search(r"\[(ERR|CRT)\]", line):
+            task_error = task_error or callback_error
+            owner = identity if identified else None
+            basis = "callback_identity" if owner else "unassigned"
+            if owner is None:
+                candidates = [key for key, location in active.items() if location == lane]
+                if len(candidates) == 1:
+                    owner, basis = candidates[0], "active_chain_same_log_lane"
+            item = {"interval_line": number, "basis": basis}
+            if owner:
+                item.update(taskchain=owner[0], taskid=owner[1])
+            bucket = "unassigned" if owner is None else "infrast" if owner[0] == "Infrast" else "other_chains"
+            result[bucket].append(item)
+        if event in {"TaskChainCompleted", "TaskChainError"} and identified:
+            active.pop(identity, None)
+    return {"groups": result, "task_error": task_error}
+
+
 def inspect_report(report: dict) -> dict:
     result = {"status": "unknown", "reason": "invalid_evidence", "chains": [],
               "reminder_required": True, "all_work_completed": "unknown",
@@ -29,19 +72,16 @@ def inspect_report(report: dict) -> dict:
     if len(data) != end - start or hashlib.sha256(data).hexdigest() != evidence.get("interval_sha256"):
         result["reason"] = "log_interval_changed_or_unhashed"
         return result
+    lines = data.decode("utf-8", errors="strict").splitlines()
+    attribution = classify_errors(lines)
     chains = {}
-    errors = []
-    for line_number, line in enumerate(data.decode("utf-8", errors="strict").splitlines(), 1):
-        if re.search(r"\[(ERR|CRT)\]", line):
-            errors.append(line_number)
+    for line_number, line in enumerate(lines, 1):
         if MARKER not in line:
             continue
         event, _, payload = line.split(MARKER, 1)[1].partition(" ")
         value = json.loads(payload)
         if not isinstance(value, dict):
             raise ValueError("callback must be an object")
-        if event in {"TaskChainError", "SubTaskError"}:
-            errors.append(line_number)
         if value.get("taskchain") != "Infrast":
             continue
         taskid = value.get("taskid")
@@ -95,14 +135,22 @@ def inspect_report(report: dict) -> dict:
         chain["rotation_status"] = "action_observed" if chain["rotation"] else "unknown"
         chain["trim_status"] = "action_observed" if chain["trim"] else "unknown"
         chain["all_work_completed"] = "unknown"
+        chain["error_interval_lines"] = [e["interval_line"] for e in attribution["groups"]["infrast"]
+                                         if e["taskid"] == chain["taskid"]]
+        chain["evidence_status"] = ("evaluated" if chain["chain_status"] == "completed"
+                                    and not chain["error_interval_lines"] else "unknown")
     result["chains"] = list(chains.values())
-    result["error_interval_lines"] = sorted(set(errors))
+    result["error_groups"] = attribution["groups"]
+    result["error_interval_lines"] = sorted({e["interval_line"] for group in attribution["groups"].values() for e in group})
+    run_failed = (report.get("wrapper_exit_code") != 0 or report.get("child_exit_code") != 0
+                  or attribution["task_error"])
+    result["run_status"] = "failed" if run_failed else "warnings" if result["error_interval_lines"] else "clean"
     result["status"] = "evaluated"
     result["reason"] = "actions_only_not_final_state"
-    if (report.get("wrapper_exit_code") != 0 or report.get("child_exit_code") != 0
-            or errors or evidence.get("callback_parse_error_lines")
-            or evidence.get("internal_error_lines")):
-        result.update(status="unknown", reason="run_failed_or_has_errors")
+    if evidence.get("callback_parse_error_lines"):
+        result.update(status="unknown", reason="callback_parse_errors")
+    elif attribution["groups"]["infrast"]:
+        result.update(status="unknown", reason="infrast_has_errors")
     elif not chains or any(c["chain_status"] != "completed" for c in chains.values()):
         result.update(status="unknown", reason="no_complete_infrast_chain")
     return result
@@ -121,7 +169,7 @@ def main(argv=None) -> int:
                   "error_type": type(error).__name__, "reminder_required": True,
                   "all_work_completed": "unknown", "chains": []}
     print(json.dumps(result, ensure_ascii=False))
-    return 0 if result["status"] == "evaluated" else 2
+    return 0 if result["status"] == "evaluated" and result.get("run_status") != "failed" else 2
 
 
 if __name__ == "__main__":

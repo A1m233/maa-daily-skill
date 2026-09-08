@@ -1,0 +1,17 @@
+{
+  "MaaDailyCheck@VerifyAP5": {
+    "algorithm": "OcrDetect", "text": ["AP-5"], "fullMatch": true,
+    "isAscii": true, "roi": [845, 72, 220, 50], "action": "DoNothing",
+    "next": ["MaaDailyCheck@StagePage"], "maxTimes": 1
+  },
+  "MaaDailyCheck@VerifyCE6": {
+    "algorithm": "OcrDetect", "text": ["CE-6"], "fullMatch": true,
+    "isAscii": true, "roi": [845, 72, 220, 50], "action": "DoNothing",
+    "next": ["MaaDailyCheck@StagePage"], "maxTimes": 1
+  },
+  "MaaDailyCheck@VerifyLS6": {
+    "algorithm": "OcrDetect", "text": ["LS-6"], "fullMatch": true,
+    "isAscii": true, "roi": [845, 72, 220, 50], "action": "DoNothing",
+    "next": ["MaaDailyCheck@StagePage"], "maxTimes": 1
+  }
+}

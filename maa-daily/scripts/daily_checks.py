@@ -106,6 +106,7 @@ def prepare(config: Path) -> list[str]:
     original = target.read_bytes() if target.exists() else None
     existing = json.loads(original.decode("utf-8-sig")) if original else {}
     additions = json.loads((assets / "tasks.json").read_text(encoding="utf-8"))
+    additions.update(json.loads((assets.parent / "drain-sanity/tasks.json").read_text(encoding="utf-8")))
     if not isinstance(existing, dict):
         raise ValueError("user resource must be a JSON object")
     for key, value in additions.items():

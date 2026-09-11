@@ -1,8 +1,8 @@
 # 既有日常接入动态清体力
 
-- 最近核验日期：2026-09-08
+- 最近核验日期：2026-09-11
 - 官方来源：[FightTask v6.17.1](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Task/Interface/FightTask.cpp)、[StageNavigationTask v6.17.1](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Task/Fight/StageNavigationTask.cpp)、[原生配置](https://docs.maa.plus/en-us/manual/cli/config.html)。
-- 边界：这是清体力日常的接入指南和候选组件，不是任意 task 的自动拆分器。当前只提供 AP-5、CE-6、LS-6 导航；CE-6 已完成首页导航、双读数和 10 连后动态 2 连补尾实测，但补尾掉落识别失败后保守停止。AP-5、LS-6 导航及新流程双账号端到端尚未实测。未经对应 smoke，不把旧入口迁移成已验证完成态。
+- 边界：这是清体力日常的接入指南和候选组件，不是任意 task 的自动拆分器。当前只提供 AP-5、CE-6、LS-6 导航；既有 CE-6 流程曾完成动态补尾并在掉落识别错误后停止，LS-6 曾跑过双账号流程。本次联合判定修订完成离线回放及 LS-6 只导航/读取实测，尚未覆盖修订后的战斗流程与 AP-5 低分现场。未经对应 smoke，不把旧入口迁移成已验证完成态。
 
 ## 首次接入：明确三段，不复制日期规则
 
@@ -35,12 +35,18 @@ python <skill-root>/scripts/drain_sanity.py probe --stage AP-5 --start-at home -
 经过当前环境有界验证后，无药清体力：
 
 ```text
-python <skill-root>/scripts/drain_sanity.py run --stage AP-5 --cost 30 --maximum 10 --start-at home --max-runs 100 --max-phases 5 --profile <profile> --output-dir <local>
+python <skill-root>/scripts/drain_sanity.py run --stage AP-5 --maximum 10 --start-at home --max-runs 100 --max-phases 5 --profile <profile> --output-dir <local>
 ```
 
-参数是示例，不是用户默认授权。`--start-at` 必填：home 表示稳定主界面；terminal 表示终端总览；prepared 表示目标关卡准备页。未知、弹窗或其他关卡不猜测恢复，由 Agent 用已经验证的 MAA 路径先恢复。`--cost`、倍率和代理资格由 Agent 按当前游戏核验；阶段条件变化、代理不可靠或还有恢复预算时不能调用 run。芯片/活动关卡与剿灭不在候选导航支持列表内，不套用。
+参数是示例，不是用户默认授权。`--start-at` 必填：home 表示稳定主界面；terminal 表示终端总览；prepared 表示目标关卡准备页。未知、弹窗或其他关卡不猜测恢复，由 Agent 用已经验证的 MAA 路径先恢复。消耗自动取[基本关卡表](daily-checks.md#基本关卡单场理智)，`--cost` 仅兼容旧调用且必须一致；错误值在任何导航前停止。倍率和代理资格仍由 Agent 按当前游戏核验；阶段条件变化、代理不可靠或还有恢复预算时不能调用 run。芯片/活动关卡与剿灭不在候选导航支持列表内，不因成本表已收录而套用。
 
 组件通过官方 Custom `Terminal-Entry` 和资源关卡节点导航，随后独立核验目标关卡名、“开始行动”区域和两次一致的理智。确认节点均为 DoNothing，不执行 Fight times=0 探路。run 使用已有 `plan` 运算，每轮只提交有理智支付的批次、全部恢复预算为零；核对实际 Fight 次数和掉落关卡，再重读理智。理智不足一场停止；读数未知、零战斗/次数不符、错误链、无理智下降或预算不足时停止，不自动重试。
+
+`cn-supply-joint-v1` 联合判定由脚本执行，不交给 Agent 自行权衡：单个有界成功 Custom 链、固定顺序的四个只读 OCR 节点、精确目标关卡名及预期区域、正确准备页按钮文字及区域、可靠且一致的理智双读数全部成立才接受。关卡文字使用 0.90 候选下限；按钮和理智仍要求 0.98。关卡高分不能覆盖错页、错位或理智冲突，重复同一低分不会累计成可靠证据。未改变 MaaCore 资源或添加备用重试，脚本返回 `probe_policy` 标识本判定版本。
+
+该下限不是统计正确率或跨客户端保证。2026-09-11 离线回放的 14 份有界报告中，AP-5 三份约 0.926、CE-6 五份与 LS-6 六份约 0.998，全部满足联合规则；同一页面复读不算独立样本。联合规则仅适配已验证的国服资源准备页；真实错关 OCR 样本不足，合成反例不等于真实误放率评估。
+
+同日修订后，LS-6 从首页、准备页、终端总览进行只导航/读取实测均通过；错误消耗与不支持关卡在操作游戏前拒绝。AP-5 低分场景仍只有回放证据。`terminal` 必须是终端总览，不是资源收集分页：在已选中的资源分页直接调用原生选关，可能因无法再次匹配 `StageResource` 入口而失败；该状态不能伪装成总览传入。失败仍须保留并先恢复准确起点，不原样重试。
 
 每个真实进程仍由薄 runner 包裹，运行同步等待，不并发执行。脚本在实际 MAA tasks 目录创建唯一名称的临时 JSON，执行 dry-run 后才运行，显式使用 `--user-resource`；需要该目录和本地证据目录的写权限及用户资源加载授权。当前保留生成文件，不自动删除；`processes.json` 列出精确 task 和报告路径，可按原有清理规则处理。`result.json` 逐阶段更新；中断后不能把 running 视为完成，也不自动续跑，应先确认没有遗留 maa 进程及在途战斗。
 

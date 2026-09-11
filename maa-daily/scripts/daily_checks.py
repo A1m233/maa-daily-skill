@@ -11,6 +11,25 @@ from pathlib import Path
 PREFIX = "MaaDailyCheck@"
 
 
+def cost_catalog() -> dict:
+    return json.loads((Path(__file__).resolve().parents[1] / "assets/stage-costs.json").read_text(encoding="utf-8"))
+
+
+def stage_cost(stage: str | None, supplied: int | None = None) -> int:
+    """Known stages use bundled facts; explicit cost is an assertion, not override."""
+    key = stage.strip().upper() if isinstance(stage, str) else None
+    known = cost_catalog()["costs"].get(key)
+    if supplied is not None and (type(supplied) is not int or supplied <= 0):
+        raise ValueError("positive integer cost required")
+    if known is not None:
+        if supplied is not None and supplied != known:
+            raise ValueError(f"stage_cost_mismatch: {stage} requires {known}, got {supplied}")
+        return known
+    if supplied is None:
+        raise ValueError("unknown_stage_cost: supply a verified --cost for an uncatalogued stage")
+    return supplied
+
+
 def plan(sanity: int, cost: int, maximum: int) -> dict:
     if sanity < 0 or cost <= 0 or not 1 <= maximum <= 10:
         raise ValueError("sanity >= 0, cost > 0, 1 <= maximum <= 10 required")
@@ -153,7 +172,7 @@ def main(argv=None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     planner = commands.add_parser("plan")
     planner.add_argument("--sanity", type=int, required=True)
-    planner.add_argument("--cost", type=int, required=True)
+    planner.add_argument("--cost", type=int, help="已收录关卡自动取值；显式值必须一致，未知关卡须先核实再提供")
     planner.add_argument("--maximum", type=int, required=True)
     planner.add_argument("--stage", help="同时生成下一阶段的完整原生 Fight task")
     planner.add_argument("--task-file", type=Path, help="可选新建 JSON task，必须同时指定 --stage；不覆盖")
@@ -161,10 +180,14 @@ def main(argv=None) -> int:
     reader.add_argument("--report", type=Path, required=True)
     installer = commands.add_parser("prepare")
     installer.add_argument("--config-dir", type=Path, required=True)
+    costs = commands.add_parser("stage-cost", help="只读查询已核验的基本关卡消耗，不启动 MAA")
+    costs.add_argument("--stage", help="不指定则列出全部已收录关卡")
     args = parser.parse_args(argv)
     try:
         if args.command == "plan":
-            value = plan(args.sanity, args.cost, args.maximum)
+            cost = stage_cost(args.stage, args.cost)
+            value = plan(args.sanity, cost, args.maximum)
+            value["cost"] = cost
             if args.task_file and (not args.stage or args.task_file.suffix.lower() != ".json"):
                 raise ValueError("--task-file requires --stage and a .json suffix")
             if args.stage and value["next_fight"]:
@@ -174,6 +197,11 @@ def main(argv=None) -> int:
                     with args.task_file.open("x", encoding="utf-8") as handle:
                         json.dump(value["task"], handle, ensure_ascii=False, indent=2)
                         handle.write("\n")
+        elif args.command == "stage-cost":
+            catalog = cost_catalog()
+            value = ({"stage": args.stage, "cost": stage_cost(args.stage),
+                      "source": catalog["source"], "verified_at": catalog["verified_at"]}
+                     if args.stage else catalog)
         elif args.command == "inspect":
             value = inspect_report(json.loads(args.report.read_text(encoding="utf-8")))
         else:

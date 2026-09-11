@@ -6,6 +6,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import contextlib
+import io
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +18,22 @@ sys.path.pop(0)
 
 def event(kind, **values):
     return drain.MARKER + kind + " " + json.dumps({"taskchain": "Fight", "taskid": 1, **values}) + "\n"
+
+
+def probe_body(stage="AP-5", score=0.925990, mutate=lambda rows: None):
+    rows = [(drain.STAGES[stage], {"text": stage, "score": score, "rect": [924, 82, 85, 27]}),
+            ("StagePage", {"text": "开始行动", "score": 0.999989, "rect": [1126, 645, 104, 26]}),
+            ("Sanity", {"text": "205/205", "score": 0.999925, "rect": [1141, 25, 118, 30]}),
+            ("SanityConfirm", {"text": "205/205", "score": 0.999925, "rect": [1141, 25, 118, 30]})]
+    mutate(rows)
+    body = event("TaskChainStart", taskchain="Custom")
+    for node, match in rows:
+        body += event("SubTaskCompleted", taskchain="Custom", first=[drain.PREFIX + drain.STAGES[stage]], details={
+            "task": node, "action": "DoNothing", "algorithm": "OcrDetect", "result": match})
+        if node.startswith("Sanity"):
+            body += (f"OcrDetect MaaDailyCheck@{node} [{{ text: {match['text']}, "
+                     f"rect: [ 1141, 25, 118, 30 ], score: {match['score']} }}]\n")
+    return body + event("TaskChainCompleted", taskchain="Custom")
 
 
 class DrainTests(unittest.TestCase):
@@ -138,14 +156,7 @@ class DrainTests(unittest.TestCase):
                 drain.check_fight(report, "AP-5", 6)
 
     def test_probe_checks_actual_stage_and_actions(self):
-        entry = drain.PREFIX + drain.STAGES["AP-5"]
-        body = event("TaskChainStart", taskchain="Custom")
-        for node, text in (("VerifyAP5", "AP-5"), ("StagePage", "开始行动"), ("Sanity", "205/205"), ("SanityConfirm", "205/205")):
-            body += event("SubTaskCompleted", taskchain="Custom", first=[entry], details={
-                "task": node, "action": "DoNothing", "result": {"text": text, "score": 0.999}})
-            if node.startswith("Sanity"):
-                body += f"OcrDetect MaaDailyCheck@{node} [{{ text: 205/205, rect: [ 1, 2, 3, 4 ], score: 0.999 }}]\n"
-        body += event("TaskChainCompleted", taskchain="Custom")
+        body = probe_body()
         with tempfile.TemporaryDirectory() as directory:
             report = self.report(directory, body)
             self.assertEqual(drain.read_probe(report, "AP-5"), 205)
@@ -153,6 +164,33 @@ class DrainTests(unittest.TestCase):
                             body.replace('"action": "DoNothing"', '"action": "ClickSelf"')):
                 with self.assertRaises(ValueError):
                     drain.read_probe(self.report(directory, changed), "AP-5")
+
+    def test_joint_probe_rejects_each_missing_or_conflicting_signal(self):
+        changes = [lambda r: r[0][1].update(text="AP-4", score=1),
+                   lambda r: r[0][1].update(text="AP-", score=1),
+                   lambda r: r[0][1].update(score=0.899),
+                   lambda r: r[0][1].update(score=float("nan")),
+                   lambda r: r[0][1].update(rect=[20, 82, 85, 27]),
+                   lambda r: r[1][1].update(text="开始推演"),
+                   lambda r: r[1][1].update(score=0.97),
+                   lambda r: r[1][1].update(rect=[1126, 500, 104, 26]),
+                   lambda r: r[2][1].update(score=0.925990),
+                   lambda r: r[3][1].update(text="204/205"),
+                   lambda r: r[3][1].update(rect=[10, 25, 118, 30]),
+                   lambda r: r.pop(1), lambda r: r.reverse(), lambda r: r.append(r[0])]
+        with tempfile.TemporaryDirectory() as directory:
+            for index, mutate in enumerate(changes):
+                with self.subTest(index=index), self.assertRaises(ValueError):
+                    drain.read_probe(self.report(directory, probe_body(mutate=mutate)), "AP-5")
+            for stage, score in (("AP-5", 0.925990), ("CE-6", 0.997455), ("LS-6", 0.998928)):
+                self.assertEqual(drain.read_probe(self.report(directory, probe_body(stage, score)), stage), 205)
+
+    def test_wrong_cost_never_constructs_runtime_or_navigates(self):
+        for stage in ("LS-6", "CE-6"):
+            with patch.object(drain, "Runtime") as runtime, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(drain.main(["run", "--stage", stage, "--cost", "30", "--start-at", "home",
+                                             "--profile", "test", "--output-dir", "unused"]), 2)
+                runtime.assert_not_called()
 
     def test_runtime_dry_run_failure_never_starts_runner(self):
         with tempfile.TemporaryDirectory() as directory:

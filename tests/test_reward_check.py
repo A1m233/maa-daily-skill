@@ -59,7 +59,7 @@ class RewardCheckTests(unittest.TestCase):
                     for item in page:
                         item["rect"][1] += 25
             elif mutation == "confidence":
-                pages["RewardBottomB"][0]["score"] = 0.6
+                pages["RewardBottomB"][-1]["score"] = 0.6
             elif mutation == "hole":
                 pages["RewardBottomA"].pop(-2)
                 pages["RewardBottomB"].pop(-2)
@@ -71,6 +71,32 @@ class RewardCheckTests(unittest.TestCase):
             with self.subTest(mutation=mutation):
                 self.assertTrue(check.classify(pages)["reminder_required"])
                 self.assertIsNone(check.classify(pages)["claimed_tiers"])
+
+    def test_overlap_resolves_only_with_two_reliable_other_endpoint_reads(self):
+        pages = pages_for(9)
+        for phase in ("RewardBottomA", "RewardBottomB"):
+            pages[phase][2].update(text="!完成", score=0.76)
+        result = check.classify(pages)
+        self.assertEqual(result["claimed_tiers"], 9)
+        self.assertEqual(len(result["resolved_ambiguities"]), 2)
+        self.assertNotIn(6, result["observed_claimed"]["RewardBottomA"])
+        self.assertIn(6, result["visible_claimed"]["RewardBottomA"])
+        for mutation in ("both_ends", "missing_support", "shift", "duplicate", "negative", "invalid_score"):
+            bad = copy.deepcopy(pages)
+            if mutation == "both_ends":
+                bad["RewardTopA"][4].update(text="!完成", score=0.76)
+            elif mutation == "missing_support":
+                bad["RewardTopA"].pop(4)
+            elif mutation == "shift":
+                bad["RewardBottomA"][2]["rect"][1] += 25
+            elif mutation == "negative":
+                bad["RewardBottomA"][2]["text"] = "未完成"
+            elif mutation == "invalid_score":
+                bad["RewardBottomA"][2]["score"] = float("nan")
+            else:
+                bad["RewardBottomA"].append(copy.deepcopy(bad["RewardBottomA"][2]))
+            with self.subTest(mutation=mutation):
+                self.assertEqual(check.classify(bad)["status"], "unknown")
 
     def test_bounded_runtime_protocol(self):
         def event(name, value):

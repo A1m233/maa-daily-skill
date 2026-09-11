@@ -6,13 +6,15 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import math
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
 import uuid
 
-from daily_checks import inspect_report, plan
+from daily_checks import inspect_report, plan, stage_cost
 
 STAGES = {"AP-5": "VerifyAP5", "CE-6": "VerifyCE6", "LS-6": "VerifyLS6"}
 PREFIX = "MaaDailyCheck@"
@@ -58,6 +60,20 @@ def navigation_tasks(stage: str, start_at: str) -> list[dict]:
     return [{"type": "Custom", "params": {"task_names": [name]}} for name in names]
 
 
+def valid_ocr(match: dict, text: str, minimum: float, roi: tuple) -> bool:
+    if not isinstance(match, dict):
+        return False
+    rect, score = match.get("rect"), match.get("score")
+    if (match.get("text") != text or type(score) not in (int, float)
+            or not math.isfinite(score) or not minimum <= score <= 1
+            or not isinstance(rect, list) or len(rect) != 4
+            or not all(type(v) in (int, float) and math.isfinite(v) for v in rect)):
+        return False
+    x, y, w, h = rect
+    left, top, width, height = roi
+    return w > 0 and h > 0 and left <= x and top <= y and x+w <= left+width and y+h <= top+height
+
+
 def read_probe(report: dict, stage: str) -> int:
     events = callbacks(report)
     entry = PREFIX + STAGES[stage]
@@ -65,18 +81,32 @@ def read_probe(report: dict, stage: str) -> int:
     if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Custom")
             or chains[1][:2] != ("TaskChainCompleted", "Custom") or chains[0][2] != chains[1][2]):
         raise ValueError("ambiguous_probe_chain")
-    verified = False
+    completed = []
     for kind, value in events:
-        if kind != "SubTaskCompleted":
+        if kind not in {"SubTaskStart", "SubTaskCompleted"}:
             continue
         detail = value.get("details", {})
-        if value.get("first") != [entry] or value.get("taskid") != chains[0][2] or detail.get("action") != "DoNothing":
+        if (value.get("first") != [entry] or value.get("taskid") != chains[0][2]
+                or value.get("taskchain") != "Custom" or detail.get("action") != "DoNothing"
+                or detail.get("algorithm") != "OcrDetect"):
             raise ValueError("unexpected_probe_action_or_origin")
-        if detail.get("task", "").removeprefix(PREFIX) == STAGES[stage]:
-            match = detail.get("result", {})
-            verified = match.get("text") == stage and match.get("score", 0) >= 0.98
+        if kind == "SubTaskCompleted":
+            completed.append((detail.get("task", "").removeprefix(PREFIX), detail.get("result", {})))
+    if [name for name, _ in completed] != [STAGES[stage], "StagePage", "Sanity", "SanityConfirm"]:
+        raise ValueError("incomplete_or_ambiguous_probe")
+    stage_match, page_match, first, second = [match for _, match in completed]
+    # 0.90 是联合条件下的保守候选下限，不是正确率；不用于理智数字。
+    if (not valid_ocr(stage_match, stage, 0.90, (845, 72, 220, 50))
+            or not valid_ocr(page_match, "开始行动", 0.98, (1010, 625, 260, 61))):
+        raise ValueError("stage_or_page_unverified")
+    for match in (first, second):
+        if (not re.fullmatch(r"\d+\s*/\s*\d+", match.get("text", ""))
+                or not valid_ocr(match, match["text"], 0.98, (1120, 20, 160, 40))):
+            raise ValueError("sanity_unverified")
+    pairs = [tuple(map(int, re.findall(r"\d+", match["text"]))) for match in (first, second)]
     reading = inspect_report(report).get("sanity")
-    if not verified or reading is None:
+    if (reading is None or pairs[0] != pairs[1]
+            or pairs[0] != (reading["current"], reading["maximum"])):
         raise ValueError("stage_or_sanity_unverified")
     return reading["current"]
 
@@ -207,15 +237,16 @@ def main(argv=None) -> int:
     parser.add_argument("--maa", default="maa")
     parser.add_argument("--profile", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--cost", type=int)
+    parser.add_argument("--cost", type=int, help="默认按关卡表取值；旧调用显式传入时必须一致，不能覆盖")
     parser.add_argument("--maximum", type=int, default=10)
     parser.add_argument("--max-phases", type=int, default=5)
     parser.add_argument("--max-runs", type=int, default=100)
     args = parser.parse_args(argv)
-    if args.mode == "run" and (args.cost is None or args.cost <= 0 or not 1 <= args.maximum <= 10
+    if args.mode == "run" and (not 1 <= args.maximum <= 10
                                or args.max_phases < 1 or args.max_runs < 1):
-        parser.error("run requires positive --cost and budgets, maximum in 1..10")
+        parser.error("run requires positive budgets, maximum in 1..10")
     try:
+        cost = stage_cost(args.stage, args.cost)  # 在目录发现、导航或任何游戏操作前拦截错误成本。
         runtime = Runtime(args.maa, args.profile, args.output_dir)
         print("本地证据目录：" + str(runtime.output), flush=True)
         nav = navigation_tasks(args.stage, args.start_at)
@@ -234,7 +265,8 @@ def main(argv=None) -> int:
             result = {"status": "observed", "sanity": observe(), "stage": args.stage}
         else:
             result = drain(observe, fight, lambda r: write_json(runtime.output / "result.json", r),
-                           cost=args.cost, maximum=args.maximum, max_phases=args.max_phases, max_runs=args.max_runs)
+                           cost=cost, maximum=args.maximum, max_phases=args.max_phases, max_runs=args.max_runs)
+        result.update(stage=args.stage, cost=cost, probe_policy="cn-supply-joint-v1")
         result["observed_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
         result["warning_report_files"] = [r["report_file"] for r in runtime.reports
                                           if r.get("internal_error_lines") or r.get("subtask_error_lines")

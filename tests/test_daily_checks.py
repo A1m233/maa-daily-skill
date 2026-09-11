@@ -3,6 +3,8 @@ import importlib.util
 import json
 import tempfile
 import unittest
+import contextlib
+import io
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -122,17 +124,38 @@ class DailyChecksTests(unittest.TestCase):
     def test_plan_writes_native_task_without_overwriting(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "next.json"
-            args = ["plan", "--sanity", "103", "--cost", "12", "--maximum", "10",
+            args = ["plan", "--sanity", "103", "--cost", "6", "--maximum", "10",
                     "--stage", "1-7", "--task-file", str(target)]
             self.assertEqual(0, checks.main(args))
             params = json.loads(target.read_text(encoding="utf-8"))["tasks"][0]["params"]
-            self.assertEqual(8, params["times"])
+            self.assertEqual(10, params["times"])
             self.assertEqual(2, checks.main(args))
             zero = Path(directory) / "zero.json"
             args[2] = "0"
             args[-1] = str(zero)
             self.assertEqual(0, checks.main(args))
             self.assertFalse(zero.exists())
+
+    def test_cost_catalog_and_conflicting_values(self):
+        for stage, cost in {"AP-5": 30, "CE-6": 36, "LS-6": 36, "CA-5": 30,
+                            "SK-5": 30, "PR-D-1": 18, "PR-D-2": 36, "1-7": 6}.items():
+            self.assertEqual(checks.stage_cost(stage), cost)
+            self.assertEqual(checks.stage_cost(stage, cost), cost)
+            with self.assertRaisesRegex(ValueError, "stage_cost_mismatch"):
+                checks.stage_cost(stage, cost+1)
+        with self.assertRaisesRegex(ValueError, "unknown_stage_cost"):
+            checks.stage_cost("UNKNOWN")
+        self.assertEqual(checks.stage_cost("UNKNOWN", 21), 21)
+
+    def test_plan_uses_known_cost_before_creating_file(self):
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            target = Path(directory) / "next.json"
+            args = ["plan", "--sanity", "205", "--stage", "LS-6", "--maximum", "10", "--task-file", str(target)]
+            self.assertEqual(checks.main(args + ["--cost", "30"]), 2)
+            self.assertFalse(target.exists())
+            self.assertEqual(checks.main(args), 0)
+            params = json.loads(target.read_text())["tasks"][0]["params"]
+            self.assertEqual((params["times"], params["series"]), (5, 5))
 
 
 if __name__ == "__main__":

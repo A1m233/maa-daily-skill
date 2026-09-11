@@ -1,0 +1,17 @@
+{
+  "source": "https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/resource/stages.json",
+  "verified_at": "2026-09-11",
+  "scope": "基础关卡正常单场 apCost；不含剿灭返还、活动减免、失败返还或开放日",
+  "costs": {
+    "1-7": 6,
+    "AP-1": 10, "AP-2": 15, "AP-3": 20, "AP-4": 25, "AP-5": 30,
+    "CA-1": 10, "CA-2": 15, "CA-3": 20, "CA-4": 25, "CA-5": 30,
+    "SK-1": 10, "SK-2": 15, "SK-3": 20, "SK-4": 25, "SK-5": 30,
+    "CE-1": 10, "CE-2": 15, "CE-3": 20, "CE-4": 25, "CE-5": 30, "CE-6": 36,
+    "LS-1": 10, "LS-2": 15, "LS-3": 20, "LS-4": 25, "LS-5": 30, "LS-6": 36,
+    "PR-A-1": 18, "PR-A-2": 36,
+    "PR-B-1": 18, "PR-B-2": 36,
+    "PR-C-1": 18, "PR-C-2": 36,
+    "PR-D-1": 18, "PR-D-2": 36
+  }
+}

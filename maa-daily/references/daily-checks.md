@@ -1,6 +1,6 @@
 # 日常检查与清体力组件
 
-- 最近核验日期：2026-09-08
+- 最近核验日期：2026-09-11
 - 官方来源：[流水线协议](https://docs.maa.plus/zh-cn/protocol/task-schema.html)、[FightTimesTaskPlugin v6.17.1](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Task/Fight/FightTimesTaskPlugin.cpp)、[任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
 - 相关实践：[ArknightsAutoHelper 奖励状态识别](https://github.com/ArknightsAutoHelper/ArknightsAutoHelper/blob/master/imgreco/task.py)。只借鉴状态识别思路；发布包不复制其图片或识别代码。
 - 边界：理智读取已通过一个账号关卡准备页的重复实测；奖励计数只覆盖下述已验证的国服十档布局，不代表所有客户端或未来布局。结果是奖励档位状态推断，不是背包增量，也不是任务点数统计。
@@ -58,7 +58,8 @@ python <skill-root>/scripts/reward_check.py --layout cn-daily-ten-v1 scan --prof
 扫描选择日常页，分别滚动到顶部和底部，每个端点重复观察一次。MaaCore 执行全部识别，Python 只消费日志中的文字、位置和分数：
 
 - 按归一化行位置映射到十个列表位置，顶底重叠位置只计一次。
-- 两次端点观测及重叠区域必须一致，已领取位置须构成末尾连续区段；低置信、错位、缺页、乱序回调或错误日志返回 unknown。
+- 先映射位置，再核对两次端点观测及重叠区域。局部疑似“已完成”的乱码或低分标记先保留为未知；仅当另一端点两次都在同一重叠位置可靠识别出精确“已完成”时消歧。缺失观测、明确相反状态、错位和重复行不按此规则补齐；不能仅凭末尾连续性推断某行已领。
+- 消歧后两次端点观测及重叠区域仍须一致，已领取位置须构成末尾连续区段。无可靠支持的歧义、缺页、乱序回调或错误日志返回 unknown。输出 `observed_claimed` 保留原始可靠位置，`resolved_ambiguities` 记录消歧位置及支持端点，`visible_claimed` 是消歧后的结果。
 - 四次观察必须来自同一个成功扫描进程、同一服务器游戏日，报告字节区间哈希必须一致。跨度超过三分钟或跨国服 04:00 换日则拒绝推断。
 - 没有任何正向“已完成”标记时返回 unknown，不把 OCR 缺失强行判为零档。只能区分已领/未领，不能区分未解锁与可领未领。
 
@@ -92,21 +93,35 @@ python <skill-root>/scripts/infrast_check.py inspect --report <本账号本轮�
 
 `interval_line` 从本报告区间第一行计数；`observed_at` 保留原报告结束时间，不代表重放时的游戏现状。当前适配本机实测回调结构；未知节点、其他语言标签和新版本语义不猜测映射。超过 64 MiB 的单次区间拒绝读取，不回退扫描整个历史日志。
 
+## 基本关卡单场理智
+
+唯一机器事实源是 [assets/stage-costs.json](../assets/stage-costs.json)，来自 MAA v6.17.1 的 [stages.json](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/resource/stages.json) 中 `apCost`，最近核对 2026-09-11。可离线查询，不启动游戏：
+
+```text
+python <skill-root>/scripts/daily_checks.py stage-cost --stage LS-6
+```
+
+省略 `--stage` 列出全部。常用值：AP-5、CA-5、SK-5 为 30；CE-6、LS-6 为 36；PR-A/B/C/D 的 1 级为 18、2 级为 36；1-7 为 6。表内还包含资源关卡的较低等级。以脚本读取值为准，不另外手写一份运行时映射。
+
+`plan --stage` 和 `drain_sanity.py` 自动取已收录消耗。保留旧 `--cost` 调用，但已知关卡传入冲突值会在生成 task / 导航前拒绝，而不是覆盖事实。表外关卡只有通用 plan 接受经当前资源或游戏核实的显式 `--cost`；不能把未知默认为 30。纯算术调用不带 stage 时仍须给 cost。
+
+该表只记录正常单场消耗，不证明开放、解锁、代理资格或动态清体力支持。剿灭返还、特殊活动和后续版本变化不套用；发现与游戏冲突时停止并核实更新事实源，不为绕过保护手改参数。
+
 ## 清体力日常
 
 需要把下面的“读取→计算→执行→重读”串成一次调用时，使用[既有任务接入指南](drain-integration.md)中的 `drain_sanity.py`。它目前是限定资源关卡的候选，不自动修改既有 business task，也不把未经 smoke 的导航当成生产能力。
 
 目标是当前授权资源用尽后，余额不足目标关卡单场消耗，不要求余额为零。普通自然理智和用药后的理智使用同一模型；芯片等次数/库存目标只参考本节，不默认清空理智。
 
-取得当前账号、当前关卡的可靠理智 `S`、单场消耗 `C`、实际支持倍率 `M` 后：
+取得当前账号、当前关卡的可靠理智 `S`、实际支持倍率 `M` 后，优先按关卡自动查询单场消耗 `C`：
 
 ```text
-python <skill-root>/scripts/daily_checks.py plan --sanity <S> --cost <C> --maximum <M>
+python <skill-root>/scripts/daily_checks.py plan --sanity <S> --stage LS-6 --maximum <M>
 ```
 
 计算 `N = floor(S / C) = q × M + k`。脚本只生成下一阶段的参数，不执行它：
 
-需要生成原生文件时加 `--stage <stage> --task-file <新文件.json>`，脚本直接生成下一阶段 Fight JSON，无需手工拼装。目标必须不存在；`N=0` 不生成文件。生成前由 Agent 确认 `C` 对应此关卡且理智证据新鲜，生成后仍需 dry-run；脚本不验证关卡开放或代理资格。
+需要生成原生文件时加 `--task-file <新文件.json>`（必须有 `--stage`），脚本直接生成下一阶段 Fight JSON，无需手工拼装。目标必须不存在；`N=0` 不生成文件。未知关卡先核实再显式给 `--cost <C>`；不带 stage 的纯算术调用也必须给 cost。生成前确认理智证据新鲜，生成后仍需 dry-run；脚本不验证关卡开放或代理资格。
 
 - `N = 0`：`next_fight = null`，不创建 `times=0` 或 `series=0` 伪探测。
 - `0 < N < M`：一次 `series=N, times=N`。
@@ -130,3 +145,5 @@ v6.17.1 的 `series=0` 新倍率路径，在初始状态优先选最大允许次
 后续实测取得已领 1、7、8、9、10 档五组带人工真值的样本；旧“已领取”图片曾在局部试验命中，但最终组件仅使用 MaaCore OCR 的“已完成”与行几何，不需要外部图片。仓库测试只保留脱敏后的标记垂直中心投影；旧样本顶部只扫描一次，回放测试中的顶部复读是合成的，不能称五种状态都经过新完整协议实测。
 
 完整脚本在相同环境、当前全领取状态真实执行成功，自动输出 10/10 和两项 claimed；没有 Agent 手工汇总，未执行领取或资源动作。多账号、其它主题/布局、零档和自然换日仍未真实覆盖；未知条件保持保守提醒。正式 business task 的战斗策略未修改，检查由最终 Award 后的这个独立进程承载。
+
+2026-09-11 的重叠消歧修订：两份既有完整扫描日志回放中，一端同一位置的乱码由另一端两次精确标记支持，均恢复为 9/10；另一个 8/10 样本保持不变。新增合成反例覆盖缺少支持、两端都歧义、错位、重复行和明确相反状态。修订后一次真实扫描完成全部节点，但没有正向标记，保守返回 unknown；这验证了扫描链与未知保护，不等于新消歧分支已经在现场重新复现。运行与用户数据只留本地。

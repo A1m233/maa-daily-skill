@@ -42,27 +42,47 @@ def classify(pages: dict[str, list[dict]]) -> dict:
     """
     if set(pages) != set(PHASES):
         return unknown("missing_or_extra_phase")
-    sets = {}
+    sets, uncertain = {}, {}
     for phase, items in pages.items():
         origin = 153 if phase.startswith("RewardTop") else -137
         visible = set(range(7)) if phase.startswith("RewardTop") else set(range(3, 10))
-        rows = set()
+        rows, ambiguous = set(), set()
         for item in items:
             text = item["text"].strip()
-            if text != "已完成":
-                if "已" in text or "完成" in text:
-                    return unknown("ambiguous_completed_text")
+            negative = text in {"未完成", "未领取", "未解锁", "可领取"}
+            if not negative and text != "已完成" and "已" not in text and "完成" not in text:
                 continue
             x, y, w, h = item["rect"]
-            if (item["score"] < 0.8 or not 80 <= x <= 180
+            if (not 80 <= x <= 180
                     or not 20 <= w <= 100 or not 10 <= h <= 35):
                 return unknown("marker_confidence_or_geometry")
             center = y + h / 2
             row = round((center - origin) / PITCH)
             if row not in visible or abs(center - (origin + row * PITCH)) > TOLERANCE:
                 return unknown("layout_mismatch")
-            rows.add(row)
+            if negative:
+                return unknown("conflicting_tier_marker")
+            if not 0 <= item["score"] <= 1:
+                return unknown("invalid_marker_score")
+            if row in rows or row in ambiguous:
+                return unknown("duplicate_row_marker")
+            if text == "已完成" and 0.8 <= item["score"] <= 1:
+                rows.add(row)
+            else:
+                ambiguous.add(row)
         sets[phase] = rows
+        uncertain[phase] = ambiguous
+    # 只有另一端点的两次可靠观测能修复局部歧义；缺失和矛盾不等于歧义。
+    observed = {key: sorted(row+1 for row in value) for key, value in sets.items()}
+    resolved = []
+    for phase, rows in uncertain.items():
+        other = PHASES[2:] if phase.startswith("RewardTop") else PHASES[:2]
+        for row in sorted(rows):
+            if row not in range(3, 7) or not all(row in sets[p] and row not in uncertain[p] for p in other):
+                return unknown("unresolved_completed_marker")
+            resolved.append({"phase": phase, "position": row+1, "supported_by": list(other)})
+    for phase, rows in uncertain.items():
+        sets[phase] |= rows
     if sets[PHASES[0]] != sets[PHASES[1]] or sets[PHASES[2]] != sets[PHASES[3]]:
         return unknown("endpoint_not_stable")
     top, bottom = sets[PHASES[0]], sets[PHASES[2]]
@@ -89,7 +109,8 @@ def classify(pages: dict[str, list[dict]]) -> dict:
             "daily_orundum": orundum, "daily_annihilation_ticket": ticket,
             "reminder_required": bool(missing), "message": message,
             "basis": "tier-state inference, not inventory delta",
-            "visible_claimed": {key: sorted(row+1 for row in value) for key, value in sets.items()}}
+            "visible_claimed": {key: sorted(row+1 for row in value) for key, value in sets.items()},
+            "observed_claimed": observed, "resolved_ambiguities": resolved}
 
 
 def game_day(instant: dt.datetime) -> str:

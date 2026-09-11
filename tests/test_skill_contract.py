@@ -23,6 +23,7 @@ class SkillContractTests(unittest.TestCase):
             "scripts/infrast_check.py",
             "scripts/drain_sanity.py",
             "assets/drain-sanity/tasks.json",
+            "assets/stage-costs.json",
             "references/create-task.md",
             "references/daily-checks.md",
             "references/drain-integration.md",

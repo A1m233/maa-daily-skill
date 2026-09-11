@@ -11,6 +11,7 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 
 - 首次创建或重新整理任务：先读 [references/create-task.md](references/create-task.md)，统一基线、提问与交付流程。
 - 清体力日常的倍率计算、理智预检查与奖励检查组件：读 [references/daily-checks.md](references/daily-checks.md)，复用捆绑脚本/原生 task，不临时手搓；特殊材料目标仅参考算法。
+- 基本关卡的单场理智从[关卡表](assets/stage-costs.json)或 `daily_checks.py stage-cost` 查询，不凭模型记忆填写；已收录关卡的计算与清体力脚本自动取值并拒绝冲突参数。
 - 既有 task 接入动态清体力、替换固定批量与单倍补尾：读 [references/drain-integration.md](references/drain-integration.md)。候选脚本含只导航与循环，先按验证边界接入，不直接重跑旧 Fight。
 - 安装、版本、目录或部分安装判断：读取 [references/install-and-discovery.md](references/install-and-discovery.md)。
 - task、profile、variants、已有文件保护或 dry-run：读取 [references/native-config.md](references/native-config.md)。

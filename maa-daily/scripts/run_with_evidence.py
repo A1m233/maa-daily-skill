@@ -34,6 +34,93 @@ KNOWN_SUBCOMMANDS = {
 LEVEL_PATTERN = re.compile(r"\]\[(TRC|DBG|INF|WRN|ERR|CRT)\]\[")
 TAIL_WINDOW = 512
 
+# These ProcessTask failures are boolean probes in MaaCore, not failed actions.
+# See safety-and-results.md for upstream source and the contextual proof required.
+CONDITIONAL_PROBES = {
+    ("Mall", "CreditShop-NoMoney"): "CreditShoppingTask",
+    ("Infrast", "UnlockClues"): "InfrastReceptionTask",
+    ("Infrast", "EndOfClueExchange"): "InfrastReceptionTask",
+}
+
+
+def classify_conditional_errors(lines: list[str], start_line: int = 1) -> dict:
+    """Keep unknown errors blocking; qualify only complete same-lane scopes.
+
+    A node name alone never qualifies. A completed enclosing handler and chain
+    are required, and any unknown error in that chain invalidates its candidates.
+    Missing/ambiguous lifecycle or malformed callbacks disable all exemptions.
+    """
+    chains, active, parents, pending, qualified = {}, {}, {}, {}, []
+    raw, invalid = [], False
+    for number, line in enumerate(lines, start_line):
+        if CALLBACK_MARKER not in line:
+            continue
+        event, _, payload = line.split(CALLBACK_MARKER, 1)[1].partition(" ")
+        if event == "SubTaskError":
+            raw.append(number)
+        try:
+            value = json.loads(payload)
+            if not isinstance(value, dict):
+                raise ValueError("callback must be object")
+            chain, taskid = value.get("taskchain"), value.get("taskid")
+            if not isinstance(chain, str) or type(taskid) is not int:
+                if event in TASKCHAIN_EVENTS or event == "SubTaskError":
+                    invalid = True
+                continue
+            key = (chain, taskid)
+            match = re.search(r"\[(P[^]]+)\]\[(T[^]]+)\]", line)
+            lane = match.groups() if match else None
+            if event == "TaskChainStart":
+                if key in chains:
+                    invalid = True
+                chains[key] = {"complete": False, "bad": False, "items": []}
+                active[key] = lane
+                continue
+            if key not in active or lane is None or lane != active[key]:
+                if event in TASKCHAIN_EVENTS or event == "SubTaskError":
+                    invalid = True
+                continue
+            state = chains[key]
+            subtask = value.get("subtask")
+            parent = "CreditShoppingTask" if chain == "Mall" else "InfrastReceptionTask" if chain == "Infrast" else None
+            if parent and subtask == parent:
+                if value.get("class") != "asst::" + parent:
+                    invalid = True
+                if event == "SubTaskStart":
+                    if key in parents:
+                        invalid = True
+                    parents[key] = parent
+                    pending[key] = []
+                elif event == "SubTaskCompleted":
+                    if parents.pop(key, None) != parent:
+                        invalid = True
+                    state["items"].extend(pending.pop(key, []))
+            if event == "SubTaskError":
+                first = value.get("first")
+                node = first[0] if isinstance(first, list) and len(first) == 1 and isinstance(first[0], str) else None
+                expected = CONDITIONAL_PROBES.get((chain, node))
+                if (expected and parents.get(key) == expected
+                        and subtask == "ProcessTask" and value.get("class") == "asst::ProcessTask"
+                        and value.get("details") == {} and value.get("pre_task") == ""):
+                    pending[key].append({"line": number, "taskchain": chain,
+                                         "taskid": taskid, "node": node,
+                                         "basis": "conditional_probe_completed_scope"})
+                else:
+                    state["bad"] = True
+            if event in {"TaskChainCompleted", "TaskChainError"}:
+                state["complete"] = event == "TaskChainCompleted" and key not in parents
+                state["bad"] |= event == "TaskChainError"
+                active.pop(key)
+        except (ValueError, TypeError):
+            invalid = True
+    if not invalid and not active:
+        for state in chains.values():
+            if state["complete"] and not state["bad"]:
+                qualified.extend(state["items"])
+    allowed = {item["line"] for item in qualified}
+    return {"conditional_subtask_errors": sorted(qualified, key=lambda item: item["line"]),
+            "blocking_subtask_error_lines": [n for n in raw if n not in allowed]}
+
 
 def _utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -138,7 +225,9 @@ def _parse_callbacks(appended: bytes, start_line: int) -> dict[str, Any]:
 
         try:
             payload = json.loads(payload_text)
-        except json.JSONDecodeError:
+            if not isinstance(payload, dict):
+                raise ValueError("callback must be an object")
+        except ValueError:
             callback_parse_error_lines.append(line_number)
             continue
 
@@ -157,6 +246,7 @@ def _parse_callbacks(appended: bytes, start_line: int) -> dict[str, Any]:
                 extra_info_types[what] += 1
 
     return {
+        **classify_conditional_errors(text.splitlines(), start_line),
         "level_counts": dict(sorted(level_counts.items())),
         "internal_error_lines": internal_error_lines,
         "callback_counts": dict(sorted(callback_counts.items())),
@@ -312,7 +402,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         wrapper_exit_code = EVIDENCE_UNAVAILABLE_EXIT
     elif child_exit_code == 0 and (
         evidence.get("callback_counts", {}).get("TaskChainError", 0)
-        or evidence.get("callback_counts", {}).get("SubTaskError", 0)
+        or evidence.get("blocking_subtask_error_lines", evidence.get("subtask_error_lines", []))
+        or evidence.get("callback_parse_error_lines")
     ):
         wrapper_exit_code = TASKCHAIN_ERROR_EXIT
 

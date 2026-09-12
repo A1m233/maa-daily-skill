@@ -81,11 +81,19 @@ runner 使用待执行命令的同一个 `maa` 可执行文件调用 `maa dir lo
 - 本次新增日志的起止行、日志是否缺失、未变化或发生轮换；
 - 本次新增日志字节区间的 SHA-256，供后续检查组件拒绝已被替换的证据区间；
 - `TaskChainStart`、`TaskChainCompleted`、`TaskChainError`、`SubTaskError` 的次数和行号；
-- MaaCore `ERR` / `CRT` 行号，以及 `SubTaskExtraInfo.what` 的类型计数。
+- MaaCore `ERR` / `CRT` 行号，以及 `SubTaskExtraInfo.what` 的类型计数；原始 `subtask_error_lines` 完整保留，另列有上下文证据的 `conditional_subtask_errors` 与仍阻断的 `blocking_subtask_error_lines`。
 
 runner 不保存完整命令参数或完整日志副本，`business_result` 固定为 `not_evaluated`。这意味着 runner 的零退出码仍不证明账号、购买、领取、招募、基建或资源消耗等后置条件成立；Agent 必须按报告给出的本轮日志范围继续核对相关业务证据。
 
-退出行为保持 fail-closed：子进程非零时保留其退出码；子进程为零但没有取得可界定的新 MaaCore 日志时返回 `74`；子进程为零但本轮存在 `TaskChainError` 或 `SubTaskError` 时返回 `75`。任一非零结果都停止同一多账号批次的后续进程；若宿主只把非零码统一显示为普通失败，精确值以报告中的 `wrapper_exit_code` 为准。报告只写本地临时或调试目录，文件名使用账号别名，不写入 Skill 仓库，也不包含账号标识。
+退出行为保持 fail-closed：子进程非零时保留其退出码；子进程为零但没有取得可界定的新 MaaCore 日志时返回 `74`；子进程为零但本轮存在 `TaskChainError`、未消歧的 `SubTaskError` 或回调解析错误时返回 `75`。任一非零结果都停止同一多账号批次的后续进程；若宿主只把非零码统一显示为普通失败，精确值以报告中的 `wrapper_exit_code` 为准。报告只写本地临时或调试目录，文件名使用账号别名，不写入 Skill 仓库，也不包含账号标识。
+
+#### 条件检查未命中与业务失败
+
+MaaCore 的部分 `ProcessTask` 被上层当作布尔条件使用，未命中可产生 `SubTaskError`，但不等于资源动作失败。已核对 v6.16.8 的 [CreditShoppingTask](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.16.8/src/MaaCore/Task/Miscellaneous/CreditShoppingTask.cpp) 在购买后探测 `CreditShop-NoMoney`，命中才停止；[InfrastReceptionTask](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.16.8/src/MaaCore/Task/Infrast/InfrastReceptionTask.cpp) 对 `UnlockClues`、`EndOfClueExchange` 的返回值也允许条件未成立后继续。
+
+脚本只对这三种调用形态做上下文分类，不让 Agent 按名称自行忽略错误：必须有同一进程/线程日志通道、任务类型与 taskid 下完整的任务链，精确的单节点 `ProcessTask` 失败，以及包围它的对应 `CreditShoppingTask` / `InfrastReceptionTask` 开始和后续完成事件；该链还必须正常完成且没有其它未识别子任务错误。缺少上下文、错误载荷不同、未知节点、父任务失败、任务链失败或回调无法解析时仍阻断。分类不证明购买成功、线索交流已开启或全部基建待办已完成，也不放宽战斗、奖励识别的错误门禁。
+
+`infrast_check.py inspect --report <原前段报告>` 在校验原日志字节区间及哈希后复用同一分类。对于旧 runner 的 `75`，只有子进程实际为零、没有 runner 异常，且原回调错误全部被上下文消歧时，才返回 `legacy_exit_reclassified=true`；保留 `original_wrapper_exit_code`，不修改旧报告。已消歧项仍作为告警输出，不算“全程无错误”。不能仅凭旧报告中的计数放行，也不能在日志丢失、轮换或哈希不符时重跑前段来掩盖缺口。续跑仍需当前授权、账号和游戏日起点核验；只有 inspect 退出零、无阻断项且业务目标允许继续时，才补剩余阶段。
 
 ## 等待长命令
 

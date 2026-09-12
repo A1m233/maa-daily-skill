@@ -3,12 +3,15 @@ import importlib.util
 import json
 import tempfile
 import unittest
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "maa-daily/scripts"))
 SPEC = importlib.util.spec_from_file_location("infrast_check", ROOT / "maa-daily/scripts/infrast_check.py")
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+sys.path.pop(0)
 
 
 def event(kind, node=None, action="ClickSelf", text="可收获", taskid=3, chain="Infrast"):

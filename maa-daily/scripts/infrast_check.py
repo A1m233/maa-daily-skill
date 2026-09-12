@@ -8,6 +8,8 @@ import json
 import re
 from pathlib import Path
 
+from run_with_evidence import classify_conditional_errors
+
 MARKER = "Assistant::append_callback | "
 CATEGORIES = {"可收获": "products", "订单交付": "orders", "干员信赖": "trust"}
 
@@ -16,10 +18,12 @@ def classify_errors(lines: list[str]) -> dict:
     """Attribute raw errors only to a unique active chain on the same log lane.
 
     Callback identity wins over timing. Pre-chain and other-thread messages
-    stay unassigned; no error-name allowlist or guessing from message text.
+    stay unassigned. Context-qualified boolean probes are reported separately.
     """
     active = {}
     result = {"infrast": [], "other_chains": [], "unassigned": []}
+    conditional = classify_conditional_errors(lines)
+    allowed = {item["line"] for item in conditional["conditional_subtask_errors"]}
     task_error = False
     for number, line in enumerate(lines, 1):
         lane_match = re.search(r"\[(P[^]]+)\]\[(T[^]]+)\]", line)
@@ -36,7 +40,7 @@ def classify_errors(lines: list[str]) -> dict:
             if not identified or identity in active:
                 raise ValueError("ambiguous chain lifecycle")
             active[identity] = lane
-        callback_error = event in {"TaskChainError", "SubTaskError"}
+        callback_error = event == "TaskChainError" or (event == "SubTaskError" and number not in allowed)
         if callback_error or re.search(r"\[(ERR|CRT)\]", line):
             task_error = task_error or callback_error
             owner = identity if identified else None
@@ -52,7 +56,7 @@ def classify_errors(lines: list[str]) -> dict:
             result[bucket].append(item)
         if event in {"TaskChainCompleted", "TaskChainError"} and identified:
             active.pop(identity, None)
-    return {"groups": result, "task_error": task_error}
+    return {"groups": result, "task_error": task_error, **conditional}
 
 
 def inspect_report(report: dict) -> dict:
@@ -141,10 +145,22 @@ def inspect_report(report: dict) -> dict:
                                     and not chain["error_interval_lines"] else "unknown")
     result["chains"] = list(chains.values())
     result["error_groups"] = attribution["groups"]
+    result["conditional_subtask_errors"] = attribution["conditional_subtask_errors"]
     result["error_interval_lines"] = sorted({e["interval_line"] for group in attribution["groups"].values() for e in group})
-    run_failed = (report.get("wrapper_exit_code") != 0 or report.get("child_exit_code") != 0
+    # Re-evaluate legacy callback-only exit 75 from the verified byte interval,
+    # without changing the original report or erasing its historical exit code.
+    original_exit = report.get("wrapper_exit_code")
+    reclassified = (original_exit == 75 and report.get("child_exit_code") == 0
+                    and not report.get("runner_error")
+                    and bool(attribution["conditional_subtask_errors"])
+                    and not attribution["task_error"]
+                    and not evidence.get("callback_parse_error_lines"))
+    result["original_wrapper_exit_code"] = original_exit
+    result["legacy_exit_reclassified"] = reclassified
+    run_failed = ((original_exit != 0 and not reclassified) or report.get("child_exit_code") != 0
                   or attribution["task_error"])
-    result["run_status"] = "failed" if run_failed else "warnings" if result["error_interval_lines"] else "clean"
+    result["run_status"] = ("failed" if run_failed else "warnings"
+                            if result["error_interval_lines"] or result["conditional_subtask_errors"] else "clean")
     result["status"] = "evaluated"
     result["reason"] = "actions_only_not_final_state"
     if evidence.get("callback_parse_error_lines"):

@@ -81,19 +81,21 @@ runner 使用待执行命令的同一个 `maa` 可执行文件调用 `maa dir lo
 - 本次新增日志的起止行、日志是否缺失、未变化或发生轮换；
 - 本次新增日志字节区间的 SHA-256，供后续检查组件拒绝已被替换的证据区间；
 - `TaskChainStart`、`TaskChainCompleted`、`TaskChainError`、`SubTaskError` 的次数和行号；
-- MaaCore `ERR` / `CRT` 行号，以及 `SubTaskExtraInfo.what` 的类型计数；原始 `subtask_error_lines` 完整保留，另列有上下文证据的 `conditional_subtask_errors` 与仍阻断的 `blocking_subtask_error_lines`。
+- MaaCore `ERR` / `CRT` 行号，以及 `SubTaskExtraInfo.what` 的类型计数；原始 `subtask_error_lines` 完整保留。`evidence.execution` 单独输出任务链执行状态及边界问题，不按内部节点名称过滤错误。
 
 runner 不保存完整命令参数或完整日志副本，`business_result` 固定为 `not_evaluated`。这意味着 runner 的零退出码仍不证明账号、购买、领取、招募、基建或资源消耗等后置条件成立；Agent 必须按报告给出的本轮日志范围继续核对相关业务证据。
 
-退出行为保持 fail-closed：子进程非零时保留其退出码；子进程为零但没有取得可界定的新 MaaCore 日志时返回 `74`；子进程为零但本轮存在 `TaskChainError`、未消歧的 `SubTaskError` 或回调解析错误时返回 `75`。任一非零结果都停止同一多账号批次的后续进程；若宿主只把非零码统一显示为普通失败，精确值以报告中的 `wrapper_exit_code` 为准。报告只写本地临时或调试目录，文件名使用账号别名，不写入 Skill 仓库，也不包含账号标识。
+报告 schema 2 采用 `execution-boundary-v1`：子进程非零时保留其退出码；子进程为零但日志不可界定、回调无法解析、任务链身份/生命周期有歧义、没有任务链或缺少终态时返回 `74`；出现 `TaskChainError`、`TaskChainStopped`、`InternalError` 或 `InitFailed` 时返回 `75`。仅有 `SubTaskError` 或内部 ERR/CRT 不会自动改写完整的任务链执行结果，但全部保留用于业务核验。零退出码只代表执行边界完整，绝不代表业务通过。任一非零结果都停止后续真实进程；宿主显示笼统失败时读取 `wrapper_exit_code`。报告只写本地临时或调试目录，不写入 Skill 仓库。
 
-#### 条件检查未命中与业务失败
+#### 执行状态、内部异常与业务结果分层
 
-MaaCore 的部分 `ProcessTask` 被上层当作布尔条件使用，未命中可产生 `SubTaskError`，但不等于资源动作失败。已核对 v6.16.8 的 [CreditShoppingTask](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.16.8/src/MaaCore/Task/Miscellaneous/CreditShoppingTask.cpp) 在购买后探测 `CreditShop-NoMoney`，命中才停止；[InfrastReceptionTask](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.16.8/src/MaaCore/Task/Infrast/InfrastReceptionTask.cpp) 对 `UnlockClues`、`EndOfClueExchange` 的返回值也允许条件未成立后继续。
+MAA 的 [AbstractTask](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.16.8/src/MaaCore/Task/AbstractTask.cpp) 在底层返回失败时发出 `SubTaskError`，而 [PackageTask](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.16.8/src/MaaCore/Task/PackageTask.cpp) 和具体调用方可以容忍失败或将其用于条件判断。不能把所有底层错误升级成整轮失败，也不能根据父任务 Completed 反推错误无害。组件不维护条件节点白名单，不尝试从缺少父调用 ID 的日志重建可靠的异常传播树。
 
-脚本只对这三种调用形态做上下文分类，不让 Agent 按名称自行忽略错误：必须有同一进程/线程日志通道、任务类型与 taskid 下完整的任务链，精确的单节点 `ProcessTask` 失败，以及包围它的对应 `CreditShoppingTask` / `InfrastReceptionTask` 开始和后续完成事件；该链还必须正常完成且没有其它未识别子任务错误。缺少上下文、错误载荷不同、未知节点、父任务失败、任务链失败或回调无法解析时仍阻断。分类不证明购买成功、线索交流已开启或全部基建待办已完成，也不放宽战斗、奖励识别的错误门禁。
+分工如下：runner 判定进程与任务链是否完整，保留诊断证据；业务组件验证用户目标；Agent 根据依赖与资源安全决定下一步。`drain_sanity.py` 的导航、理智与战斗核验、`reward_check.py` 的扫描核验仍拒绝包含子任务错误的对应报告，不因 runner 零退出码跳过严格检查。基建组件只提取收取、轮换等已观察动作；有内部异常时标记需业务复核，未知结果不能改成成功。
 
-`infrast_check.py inspect --report <原前段报告>` 在校验原日志字节区间及哈希后复用同一分类。对于旧 runner 的 `75`，只有子进程实际为零、没有 runner 异常，且原回调错误全部被上下文消歧时，才返回 `legacy_exit_reclassified=true`；保留 `original_wrapper_exit_code`，不修改旧报告。已消歧项仍作为告警输出，不算“全程无错误”。不能仅凭旧报告中的计数放行，也不能在日志丢失、轮换或哈希不符时重跑前段来掩盖缺口。续跑仍需当前授权、账号和游戏日起点核验；只有 inspect 退出零、无阻断项且业务目标允许继续时，才补剩余阶段。
+`infrast_check.py inspect --report <原前段报告>` 校验日志字节区间与哈希后重新判断执行状态。只有 schema 1 的旧 `75`、子进程零退出、无 runner 异常，且原日志含子任务错误但执行边界完整时，才返回 `legacy_exit_reclassified=true`；这只撤销旧的执行阻断，不表示错误已消歧或业务成功。保留 `original_wrapper_exit_code` 和全部诊断，不修改原报告；schema 2 的非零结果、非零子进程或损坏证据不这样重分类。
+
+**是否继续的门槛：** 执行失败/未知、账号不可信、在途战斗未明、起点不能安全恢复、资源预算不明、下一步依赖的业务前置未满足时停止。若执行完整、下一步的独立安全前置已核实，且缺口不是用户规定必须先完成的事项，可以在已有授权内继续不依赖该缺口的阶段，同时保留未完成/未知并提醒；例如不能只因会客室内部告警取消所有后续刷图，也不能在剿灭优先目标未闭环时直接消耗普通关卡理智。检查器输出 `continuation=requires_business_preconditions` 不是自动放行；不自动重跑、补偿或把部分完成报成全完成。跨账号仍服从原失败隔离要求。
 
 ## 等待长命令
 

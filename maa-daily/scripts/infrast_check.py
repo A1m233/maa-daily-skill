@@ -8,7 +8,7 @@ import json
 import re
 from pathlib import Path
 
-from run_with_evidence import classify_conditional_errors
+from run_with_evidence import classify_execution
 
 MARKER = "Assistant::append_callback | "
 CATEGORIES = {"可收获": "products", "订单交付": "orders", "干员信赖": "trust"}
@@ -18,13 +18,10 @@ def classify_errors(lines: list[str]) -> dict:
     """Attribute raw errors only to a unique active chain on the same log lane.
 
     Callback identity wins over timing. Pre-chain and other-thread messages
-    stay unassigned. Context-qualified boolean probes are reported separately.
+    stay unassigned. Attribution is diagnostic, not an execution verdict.
     """
     active = {}
     result = {"infrast": [], "other_chains": [], "unassigned": []}
-    conditional = classify_conditional_errors(lines)
-    allowed = {item["line"] for item in conditional["conditional_subtask_errors"]}
-    task_error = False
     for number, line in enumerate(lines, 1):
         lane_match = re.search(r"\[(P[^]]+)\]\[(T[^]]+)\]", line)
         lane = lane_match.groups() if lane_match else None
@@ -40,23 +37,25 @@ def classify_errors(lines: list[str]) -> dict:
             if not identified or identity in active:
                 raise ValueError("ambiguous chain lifecycle")
             active[identity] = lane
-        callback_error = event == "TaskChainError" or (event == "SubTaskError" and number not in allowed)
+        callback_error = event in {"TaskChainError", "SubTaskError", "TaskChainStopped", "InternalError", "InitFailed"}
         if callback_error or re.search(r"\[(ERR|CRT)\]", line):
-            task_error = task_error or callback_error
             owner = identity if identified else None
             basis = "callback_identity" if owner else "unassigned"
             if owner is None:
                 candidates = [key for key, location in active.items() if location == lane]
                 if len(candidates) == 1:
                     owner, basis = candidates[0], "active_chain_same_log_lane"
-            item = {"interval_line": number, "basis": basis}
+            item = {"interval_line": number, "basis": basis, "event": event or "log_error"}
+            if event == "SubTaskError":
+                item["subtask"] = value.get("subtask")
+                item["first"] = value.get("first")
             if owner:
                 item.update(taskchain=owner[0], taskid=owner[1])
             bucket = "unassigned" if owner is None else "infrast" if owner[0] == "Infrast" else "other_chains"
             result[bucket].append(item)
-        if event in {"TaskChainCompleted", "TaskChainError"} and identified:
+        if event in {"TaskChainCompleted", "TaskChainError", "TaskChainStopped"} and identified:
             active.pop(identity, None)
-    return {"groups": result, "task_error": task_error, **conditional}
+    return {"groups": result, "execution": classify_execution(lines)}
 
 
 def inspect_report(report: dict) -> dict:
@@ -103,6 +102,8 @@ def inspect_report(report: dict) -> dict:
             if not chain["started"] or chain["chain_status"] != "unknown":
                 raise ValueError("invalid chain lifecycle")
             chain["chain_status"] = "completed"
+        elif event in {"TaskChainError", "TaskChainStopped"}:
+            chain["chain_status"] = "failed"
         elif event == "SubTaskCompleted":
             if not chain["started"] or chain["chain_status"] != "unknown":
                 raise ValueError("subtask outside active chain")
@@ -141,32 +142,33 @@ def inspect_report(report: dict) -> dict:
         chain["all_work_completed"] = "unknown"
         chain["error_interval_lines"] = [e["interval_line"] for e in attribution["groups"]["infrast"]
                                          if e["taskid"] == chain["taskid"]]
-        chain["evidence_status"] = ("evaluated" if chain["chain_status"] == "completed"
-                                    and not chain["error_interval_lines"] else "unknown")
+        chain["evidence_status"] = "evaluated" if chain["chain_status"] == "completed" else "unknown"
+        chain["business_review_required"] = bool(chain["error_interval_lines"])
     result["chains"] = list(chains.values())
     result["error_groups"] = attribution["groups"]
-    result["conditional_subtask_errors"] = attribution["conditional_subtask_errors"]
+    result["execution"] = attribution["execution"]
     result["error_interval_lines"] = sorted({e["interval_line"] for group in attribution["groups"].values() for e in group})
-    # Re-evaluate legacy callback-only exit 75 from the verified byte interval,
-    # without changing the original report or erasing its historical exit code.
+    # Re-evaluate only old callback-based 75, without changing its source report.
     original_exit = report.get("wrapper_exit_code")
-    reclassified = (original_exit == 75 and report.get("child_exit_code") == 0
+    reclassified = (report.get("schema_version", 1) == 1
+                    and original_exit == 75 and report.get("child_exit_code") == 0
                     and not report.get("runner_error")
-                    and bool(attribution["conditional_subtask_errors"])
-                    and not attribution["task_error"]
+                    and any(e["event"] == "SubTaskError" for group in attribution["groups"].values() for e in group)
+                    and attribution["execution"]["status"] == "completed"
                     and not evidence.get("callback_parse_error_lines"))
     result["original_wrapper_exit_code"] = original_exit
     result["legacy_exit_reclassified"] = reclassified
     run_failed = ((original_exit != 0 and not reclassified) or report.get("child_exit_code") != 0
-                  or attribution["task_error"])
+                  or report.get("runner_error")
+                  or attribution["execution"]["status"] != "completed")
     result["run_status"] = ("failed" if run_failed else "warnings"
-                            if result["error_interval_lines"] or result["conditional_subtask_errors"] else "clean")
+                            if result["error_interval_lines"] else "clean")
+    result["continuation"] = "blocked_execution" if run_failed else "requires_business_preconditions"
+    result["business_review_required"] = bool(result["error_interval_lines"])
     result["status"] = "evaluated"
     result["reason"] = "actions_only_not_final_state"
     if evidence.get("callback_parse_error_lines"):
         result.update(status="unknown", reason="callback_parse_errors")
-    elif attribution["groups"]["infrast"]:
-        result.update(status="unknown", reason="infrast_has_errors")
     elif not chains or any(c["chain_status"] != "completed" for c in chains.values()):
         result.update(status="unknown", reason="no_complete_infrast_chain")
     return result

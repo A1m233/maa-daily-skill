@@ -19,7 +19,7 @@ REPORT_PREFIX = "MAA_EVIDENCE_JSON="
 EVIDENCE_UNAVAILABLE_EXIT = 74
 TASKCHAIN_ERROR_EXIT = 75
 CALLBACK_MARKER = "Assistant::append_callback | "
-TASKCHAIN_EVENTS = {"TaskChainStart", "TaskChainCompleted", "TaskChainError"}
+TASKCHAIN_EVENTS = {"TaskChainStart", "TaskChainCompleted", "TaskChainError", "TaskChainStopped"}
 KNOWN_SUBCOMMANDS = {
     "startup",
     "closedown",
@@ -34,92 +34,50 @@ KNOWN_SUBCOMMANDS = {
 LEVEL_PATTERN = re.compile(r"\]\[(TRC|DBG|INF|WRN|ERR|CRT)\]\[")
 TAIL_WINDOW = 512
 
-# These ProcessTask failures are boolean probes in MaaCore, not failed actions.
-# See safety-and-results.md for upstream source and the contextual proof required.
-CONDITIONAL_PROBES = {
-    ("Mall", "CreditShop-NoMoney"): "CreditShoppingTask",
-    ("Infrast", "UnlockClues"): "InfrastReceptionTask",
-    ("Infrast", "EndOfClueExchange"): "InfrastReceptionTask",
-}
+def classify_execution(lines: list[str], start_line: int = 1) -> dict:
+    """Judge the execution boundary, never infer business success from errors.
 
-
-def classify_conditional_errors(lines: list[str], start_line: int = 1) -> dict:
-    """Keep unknown errors blocking; qualify only complete same-lane scopes.
-
-    A node name alone never qualifies. A completed enclosing handler and chain
-    are required, and any unknown error in that chain invalidates its candidates.
-    Missing/ambiguous lifecycle or malformed callbacks disable all exemptions.
+    SubTaskError remains diagnostic even when the enclosing chain completes.
+    No node-name exemptions and no attempt to reconstruct hidden parent scopes.
     """
-    chains, active, parents, pending, qualified = {}, {}, {}, {}, []
-    raw, invalid = [], False
+    chains, active, issues = {}, set(), []
+    failed = False
     for number, line in enumerate(lines, start_line):
         if CALLBACK_MARKER not in line:
             continue
         event, _, payload = line.split(CALLBACK_MARKER, 1)[1].partition(" ")
-        if event == "SubTaskError":
-            raw.append(number)
         try:
             value = json.loads(payload)
             if not isinstance(value, dict):
                 raise ValueError("callback must be object")
+            if event in {"InternalError", "InitFailed"}:
+                failed = True
+            if event not in TASKCHAIN_EVENTS and event != "SubTaskError":
+                continue
             chain, taskid = value.get("taskchain"), value.get("taskid")
             if not isinstance(chain, str) or type(taskid) is not int:
-                if event in TASKCHAIN_EVENTS or event == "SubTaskError":
-                    invalid = True
+                issues.append({"line": number, "reason": "missing_chain_identity"})
                 continue
             key = (chain, taskid)
-            match = re.search(r"\[(P[^]]+)\]\[(T[^]]+)\]", line)
-            lane = match.groups() if match else None
             if event == "TaskChainStart":
                 if key in chains:
-                    invalid = True
-                chains[key] = {"complete": False, "bad": False, "items": []}
-                active[key] = lane
+                    issues.append({"line": number, "reason": "reused_chain_identity"})
+                chains[key] = "running"
+                active.add(key)
                 continue
-            if key not in active or lane is None or lane != active[key]:
-                if event in TASKCHAIN_EVENTS or event == "SubTaskError":
-                    invalid = True
-                continue
-            state = chains[key]
-            subtask = value.get("subtask")
-            parent = "CreditShoppingTask" if chain == "Mall" else "InfrastReceptionTask" if chain == "Infrast" else None
-            if parent and subtask == parent:
-                if value.get("class") != "asst::" + parent:
-                    invalid = True
-                if event == "SubTaskStart":
-                    if key in parents:
-                        invalid = True
-                    parents[key] = parent
-                    pending[key] = []
-                elif event == "SubTaskCompleted":
-                    if parents.pop(key, None) != parent:
-                        invalid = True
-                    state["items"].extend(pending.pop(key, []))
-            if event == "SubTaskError":
-                first = value.get("first")
-                node = first[0] if isinstance(first, list) and len(first) == 1 and isinstance(first[0], str) else None
-                expected = CONDITIONAL_PROBES.get((chain, node))
-                if (expected and parents.get(key) == expected
-                        and subtask == "ProcessTask" and value.get("class") == "asst::ProcessTask"
-                        and value.get("details") == {} and value.get("pre_task") == ""):
-                    pending[key].append({"line": number, "taskchain": chain,
-                                         "taskid": taskid, "node": node,
-                                         "basis": "conditional_probe_completed_scope"})
-                else:
-                    state["bad"] = True
-            if event in {"TaskChainCompleted", "TaskChainError"}:
-                state["complete"] = event == "TaskChainCompleted" and key not in parents
-                state["bad"] |= event == "TaskChainError"
-                active.pop(key)
+            if key not in active:
+                issues.append({"line": number, "reason": "event_outside_active_chain"})
+            if event in {"TaskChainError", "TaskChainStopped"}:
+                failed = True
+            if event in TASKCHAIN_EVENTS:
+                chains[key] = "completed" if event == "TaskChainCompleted" else "failed"
+                active.discard(key)
         except (ValueError, TypeError):
-            invalid = True
-    if not invalid and not active:
-        for state in chains.values():
-            if state["complete"] and not state["bad"]:
-                qualified.extend(state["items"])
-    allowed = {item["line"] for item in qualified}
-    return {"conditional_subtask_errors": sorted(qualified, key=lambda item: item["line"]),
-            "blocking_subtask_error_lines": [n for n in raw if n not in allowed]}
+            issues.append({"line": number, "reason": "invalid_callback"})
+    status = "failed" if failed else "unknown" if issues or active or not chains else "completed"
+    return {"policy": "execution-boundary-v1", "status": status, "issues": issues,
+            "incomplete_chains": [{"taskchain": c, "taskid": i} for c, i in sorted(active)],
+            "business_result": "not_evaluated"}
 
 
 def _utc_now() -> str:
@@ -246,7 +204,7 @@ def _parse_callbacks(appended: bytes, start_line: int) -> dict[str, Any]:
                 extra_info_types[what] += 1
 
     return {
-        **classify_conditional_errors(text.splitlines(), start_line),
+        "execution": classify_execution(text.splitlines(), start_line),
         "level_counts": dict(sorted(level_counts.items())),
         "internal_error_lines": internal_error_lines,
         "callback_counts": dict(sorted(callback_counts.items())),
@@ -368,7 +326,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         before = _snapshot(core_log)
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         report = {
-            "schema_version": 1,
+            "schema_version": 2,
             "started_at": started_at,
             "ended_at": _utc_now(),
             "command": command_summary,
@@ -400,15 +358,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     wrapper_exit_code = child_exit_code
     if child_exit_code == 0 and evidence["state"] != "bounded":
         wrapper_exit_code = EVIDENCE_UNAVAILABLE_EXIT
-    elif child_exit_code == 0 and (
-        evidence.get("callback_counts", {}).get("TaskChainError", 0)
-        or evidence.get("blocking_subtask_error_lines", evidence.get("subtask_error_lines", []))
-        or evidence.get("callback_parse_error_lines")
-    ):
+    elif child_exit_code == 0 and evidence.get("execution", {}).get("status") == "failed":
         wrapper_exit_code = TASKCHAIN_ERROR_EXIT
+    elif child_exit_code == 0 and evidence.get("execution", {}).get("status") != "completed":
+        wrapper_exit_code = EVIDENCE_UNAVAILABLE_EXIT
 
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "started_at": started_at,
         "ended_at": _utc_now(),
         "command": command_summary,

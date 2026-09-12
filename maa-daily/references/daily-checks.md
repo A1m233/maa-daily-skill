@@ -89,7 +89,7 @@ python <skill-root>/scripts/infrast_check.py inspect --report <本账号本轮�
 
 错误分为 `error_groups.infrast`、`other_chains`、`unassigned`：回调用明确的任务身份归属；普通 ERR/CRT 仅在同一日志进程/线程上有唯一活动任务链时按执行区间归属，不能从错误名称猜测。链外、不同线程或多链歧义的错误保留为未归属告警，不自动归给基建。分组保留行号与归属依据，不将其他任务的错误称为无害。
 
-`status` / 每条链的 `evidence_status` 表示基建动作证据是否可分类；基建自身有错误、回调解析异常或缺少完整基建链时为 unknown。独立的 `run_status` 表示整轮进程是 clean、warnings 或 failed；其他链的错误不抹去有效基建动作，但也不因此消除整轮失败。退出码 0 表示基建日志可分类且整轮进程未失败，不表示基建全完成；2 表示基建证据未知或整轮进程失败。失败运行中可解析的动作仍保留作部分证据，失败隔离规则不变。
+`status` / 每条链的 `evidence_status` 表示基建动作证据是否可分类；内部错误不抹掉已有动作，回调解析异常或缺少完整基建链时仍为 unknown。全部异常保留在 `error_groups`，`business_review_required=true` 要求核验受影响的用户目标，不表示异常已被证明无害。独立的 `execution` 描述执行边界，`run_status` 保留 clean、warnings、failed 分类。退出码 0 只表示日志可分类且执行未失败，2 表示证据未知或执行失败；两者都不能证明基建全完成。`continuation` 为 blocked_execution 或 requires_business_preconditions，后者不能代替 Agent 的业务前置核验。旧报告的执行重分类与后续门槛见[结果分层](safety-and-results.md#执行状态内部异常与业务结果分层)。
 
 `interval_line` 从本报告区间第一行计数；`observed_at` 保留原报告结束时间，不代表重放时的游戏现状。当前适配本机实测回调结构；未知节点、其他语言标签和新版本语义不猜测映射。超过 64 MiB 的单次区间拒绝读取，不回退扫描整个历史日志。
 

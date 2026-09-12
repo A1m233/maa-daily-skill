@@ -92,9 +92,11 @@ class InfrastTests(unittest.TestCase):
         body = self.chain("[ERR] failed\n")
         body += event("TaskChainStart", taskid=4) + event("TaskChainCompleted", taskid=4)
         result = self.inspect(body)
-        self.assertEqual(result["status"], "unknown")
-        self.assertEqual(result["reason"], "infrast_has_errors")
-        self.assertEqual(result["chains"][0]["evidence_status"], "unknown")
+        self.assertEqual(result["status"], "evaluated")
+        self.assertEqual(result["reason"], "actions_only_not_final_state")
+        self.assertEqual(result["chains"][0]["evidence_status"], "evaluated")
+        self.assertTrue(result["chains"][0]["business_review_required"])
+        self.assertFalse(result["chains"][1]["business_review_required"])
         self.assertEqual(result["chains"][1]["evidence_status"], "evaluated")
 
     def test_other_thread_and_overlapping_chains_not_guessed(self):
@@ -110,7 +112,7 @@ class InfrastTests(unittest.TestCase):
         result = self.inspect(body)
         self.assertEqual(len(result["error_groups"]["unassigned"]), 1)
         self.assertEqual(len(result["error_groups"]["other_chains"]), 1)
-        self.assertEqual(result["run_status"], "failed")
+        self.assertEqual(result["run_status"], "warnings")
         self.assertEqual(result["status"], "evaluated")
 
     def test_missing_lifecycle_and_bad_callback(self):

@@ -24,6 +24,7 @@ class SkillContractTests(unittest.TestCase):
             "scripts/drain_sanity.py",
             "scripts/medicine_policy.py",
             "scripts/medicine_sanity.py",
+            "scripts/stage_runtime.py",
             "assets/medicine-policy.example.toml",
             "assets/medicine-check/tasks.json",
             "references/expiring-medicine.md",

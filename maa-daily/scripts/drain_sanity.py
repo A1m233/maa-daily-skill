@@ -7,6 +7,7 @@ import datetime as dt
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -16,8 +17,9 @@ import uuid
 
 from daily_checks import inspect_report, plan, stage_cost
 from medicine_policy import load_policy, validate_policy, recovery_task, inspect_recovery
+from stage_runtime import VERIFY, normalize_stage, probe_task, isolated_config, STOP_NODES
 
-STAGES = {"AP-5": "VerifyAP5", "CE-6": "VerifyCE6", "LS-6": "VerifyLS6"}
+STAGES = {"AP-5": "VerifyAP5", "CE-6": "VerifyCE6", "LS-6": "VerifyLS6"}  # 只用于旧报告兼容，不限制新入口。
 PREFIX = "MaaDailyCheck@"
 MARKER = "Assistant::append_callback | "
 
@@ -53,43 +55,43 @@ def callbacks(report: dict) -> list[tuple[str, dict]]:
 
 
 def navigation_tasks(stage: str, start_at: str = "auto") -> list[dict]:
-    if stage not in STAGES or start_at not in {"auto", "home", "terminal", "prepared"}:
+    stage = normalize_stage(stage)
+    if start_at not in {"auto", "home", "terminal", "prepared"}:
         raise ValueError("unsupported_navigation")
-    if start_at == "auto":
-        return [{"type": "Custom", "params": {"task_names": [PREFIX + "Nav" + STAGES[stage]]}}]
-    names = (["Terminal-Entry"] if start_at == "home" else [])
-    if start_at != "prepared":
-        names.append(stage)
-    return [{"type": "Custom", "params": {"task_names": [name]}} for name in names]
+    if start_at == "prepared":
+        return []
+    # 正数才能启用原生 StageNavigationTask；必须搭配隔离的 Stop 资源。
+    return [{"type": "Fight", "params": {"stage": stage, "times": 1, "series": 1,
+             "medicine": 0, "medicine_expire_days": 0, "stone": 0}}]
 
 
 def read_navigation(report: dict, stage: str) -> str:
-    """Consume only this process's bounded navigation endpoint, never LLM page guesses."""
+    normalize_stage(stage)
     events = callbacks(report)
     chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
-    if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Custom")
-            or chains[1][:2] != ("TaskChainCompleted", "Custom") or chains[0][2] != chains[1][2]):
+    if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Fight")
+            or chains[1][:2] != ("TaskChainCompleted", "Fight") or chains[0][2] != chains[1][2]):
         raise ValueError("ambiguous_navigation_chain")
-    nodes = json.loads((Path(__file__).resolve().parents[1] / "assets/drain-sanity/tasks.json").read_text(encoding="utf-8"))
-    completed = []
+    stopped, navigated = False, False
     for kind, value in events:
-        if kind not in {"SubTaskStart", "SubTaskCompleted"}:
-            continue
         detail = value.get("details", {})
-        name = PREFIX + detail.get("task", "").removeprefix(PREFIX)
-        spec = nodes.get(name, {})
-        if (value.get("first") != [PREFIX + "Nav" + STAGES[stage]]
-                or value.get("taskid") != chains[0][2] or value.get("taskchain") != "Custom"
-                or not name.startswith(PREFIX + "Nav") or not spec
-                or detail.get("action") != spec.get("action", "DoNothing")):
-            raise ValueError("unexpected_navigation_action_or_origin")
-        if kind == "SubTaskCompleted":
-            completed.append(name)
-    if completed and completed[-1] == PREFIX + "NavReady" + STAGES[stage]:
-        return "prepared"  # Only a routing hint; full stage/button/sanity probe still mandatory.
-    if completed and completed[-1] == PREFIX + "NavTerminal":
-        return "terminal"
-    raise ValueError("navigation_endpoint_unverified")
+        node = detail.get("task", "").split("@")[-1]
+        if kind.startswith("SubTask"):
+            if value.get("taskchain") != "Fight":
+                raise ValueError("unexpected_navigation_origin")
+            if (value.get("what") in {"UseMedicine", "StageDrops"}
+                    or (value.get("what") == "FightTimes" and detail.get("times_finished", 0) != 0)
+                    or node.startswith("PRTS") or node in {"EndOfAction", "BattleOfficiallyBegin"}):
+                raise ValueError("unexpected_navigation_battle")
+            if node in STOP_NODES and detail.get("action") not in {None, "Stop", "DoNothing"}:
+                raise ValueError("unexpected_navigation_resource_action")
+        if kind == "SubTaskCompleted" and value.get("subtask") == "StageNavigationTask":
+            navigated = True
+        if kind == "SubTaskStart" and node == "FightBegin" and detail.get("action") == "Stop":
+            stopped = True
+    if not stopped or not navigated:
+        raise ValueError("navigation_stop_or_stage_unverified")
+    return "prepared"  # 下一进程独立 OCR 验证目标；不是最终开战许可。
 
 
 def valid_ocr(match: dict, text: str, minimum: float, roi: tuple) -> bool:
@@ -108,7 +110,11 @@ def valid_ocr(match: dict, text: str, minimum: float, roi: tuple) -> bool:
 
 def read_probe(report: dict, stage: str) -> int:
     events = callbacks(report)
-    entry = PREFIX + STAGES[stage]
+    stage = normalize_stage(stage)
+    # 接受旧版本报告用于回放；新运行始终生成参数化 VerifyStage。
+    legacy = PREFIX + STAGES.get(stage, "VerifyStage")
+    origins = [v.get("first") for k, v in events if k == "SubTaskCompleted"]
+    entry = legacy if origins and all(o == [legacy] for o in origins) else VERIFY
     chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
     if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Custom")
             or chains[1][:2] != ("TaskChainCompleted", "Custom") or chains[0][2] != chains[1][2]):
@@ -124,7 +130,7 @@ def read_probe(report: dict, stage: str) -> int:
             raise ValueError("unexpected_probe_action_or_origin")
         if kind == "SubTaskCompleted":
             completed.append((detail.get("task", "").removeprefix(PREFIX), detail.get("result", {})))
-    if [name for name, _ in completed] != [STAGES[stage], "StagePage", "Sanity", "SanityConfirm"]:
+    if [name for name, _ in completed] != [entry.removeprefix(PREFIX), "StagePage", "Sanity", "SanityConfirm"]:
         raise ValueError("incomplete_or_ambiguous_probe")
     stage_match, page_match, first, second = [match for _, match in completed]
     # 0.90 是联合条件下的保守候选下限，不是正确率；不用于理智数字。
@@ -312,28 +318,47 @@ class Runtime:
         self.config = Path(query.stdout.strip().splitlines()[-1])
         assets = Path(__file__).resolve().parents[1] / "assets"
         resource = json.loads((self.config / "resource/tasks/tasks.json").read_text(encoding="utf-8-sig"))
-        for file in (assets / "daily-checks/tasks.json", assets / "drain-sanity/tasks.json"):
+        for file in (assets / "daily-checks/tasks.json",):
             for key, value in json.loads(file.read_text(encoding="utf-8")).items():
-                if key.startswith((PREFIX + "Verify", PREFIX + "Nav")) or key in {PREFIX + s for s in ("StagePage", "Sanity", "SanityConfirm")}:
+                if key in {PREFIX + s for s in ("StagePage", "Sanity", "SanityConfirm")}:
                     if resource.get(key) != value:
                         raise ValueError("probe_resource_missing_or_changed: " + key)
         output.mkdir(parents=True, exist_ok=True)
         self.output = Path(tempfile.mkdtemp(prefix="drain-", dir=output))
         self.reports = []
 
-    def run(self, tasks: list[dict], phase: str) -> dict:
+    def configure_stage(self, stage: str) -> None:
+        stage = normalize_stage(stage)
+        if not re.fullmatch(r"[\w.-]+", self.profile) or self.profile in {".", ".."}:
+            raise ValueError("profile_must_be_a_local_name")
+        self.stage_config = isolated_config(self.config, self.output / "config-run", stage, navigation=False)
+        self.navigation_config = isolated_config(self.config, self.output / "config-navigation", stage, navigation=True)
+
+    def run(self, tasks: list[dict], phase: str, *, navigation: bool = False) -> dict:
+        config = getattr(self, "stage_config", self.config)
+        if navigation:
+            config = self.navigation_config
+        env = os.environ.copy()
+        env["MAA_CONFIG_DIR"] = str(config)
+        if config != self.config:
+            query = subprocess.run([self.maa, "dir", "config", "--batch"], env=env, check=True,
+                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
+            if Path(query.stdout.strip().splitlines()[-1]).resolve() != config.resolve():
+                raise ValueError("isolated_config_not_honored")
         name = "maa-drain-" + uuid.uuid4().hex
-        target = self.config / "tasks" / (name + ".json")
+        target = config / "tasks" / (name + ".json")
         with target.open("x", encoding="utf-8") as handle:
             json.dump({"tasks": tasks}, handle, ensure_ascii=False)
         # Keep exact generated task paths for audit; no automatic deletion or retry.
         record = {"phase": phase, "task_file": str(target), "report_file": str(self.output / (name + ".json"))}
+        record["config_dir"] = str(config)
+        record["navigation_guard"] = navigation
         self.reports.append(record)
         write_json(self.output / "processes.json", {"processes": self.reports})
         command = [self.maa, "run", name, "--profile", self.profile, "--batch", "--user-resource"]
-        subprocess.run(command + ["--dry-run"], check=True)
+        subprocess.run(command + ["--dry-run"], check=True, env=env)
         runner = Path(__file__).with_name("run_with_evidence.py")
-        code = subprocess.run([sys.executable, "-B", str(runner), "--report-file", record["report_file"], "--", *command]).returncode
+        code = subprocess.run([sys.executable, "-B", str(runner), "--report-file", record["report_file"], "--", *command], env=env).returncode
         record["runner_exit_code"] = code
         try:
             report = json.loads(Path(record["report_file"]).read_text(encoding="utf-8"))
@@ -353,21 +378,16 @@ def navigate(runtime, stage: str, start_at: str = "auto") -> None:
     nav = navigation_tasks(stage, start_at)
     if not nav:
         return
-    report = runtime.run(nav, "navigation")
-    callbacks(report)
-    if report["evidence"].get("internal_error_lines"):
-        raise ValueError("navigation_has_errors")
-    if start_at == "auto" and read_navigation(report, stage) == "terminal":
-        report = runtime.run(navigation_tasks(stage, "terminal"), "stage-navigation")
-        callbacks(report)
-        if report["evidence"].get("internal_error_lines"):
-            raise ValueError("navigation_has_errors")
+    report = runtime.run(nav, "navigation", navigation=True)
+    # 原生 Fight 初始化也会产出内部告警；完整保留于 Runtime 报告。
+    # 依赖选关完成、Stop 与无资源动作证据，不按 ERR 数量或节点白名单判失败。
+    read_navigation(report, stage)
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="统一清体力：固定倍率、可选临期药、收尾检查；不切号、不领奖。")
     parser.add_argument("mode", choices=["probe", "run"])
-    parser.add_argument("--stage", choices=list(STAGES), required=True)
+    parser.add_argument("--stage", required=True, help="MAA 支持的标准关卡代码；不接受剿灭/难度后缀")
     parser.add_argument("--start-at", choices=["auto", "home", "terminal", "prepared"], default="auto",
                         help="默认 auto：由 MAA 导航并确认起点；旧显式起点仅供诊断兼容")
     parser.add_argument("--maa", default="maa")
@@ -383,16 +403,18 @@ def main(argv=None) -> int:
                                or args.max_phases < 1 or args.max_runs < 1):
         parser.error("run requires positive budgets, maximum in 1..10")
     try:
+        args.stage = normalize_stage(args.stage)
         cost = stage_cost(args.stage, args.cost)  # 在目录发现、导航或任何游戏操作前拦截错误成本。
         policy = load_policy(args.policy) if args.policy else {"mode": "off", "medicine_expire_days": 1}
         runtime = Runtime(args.maa, args.profile, args.output_dir)
+        runtime.configure_stage(args.stage)
         if args.mode == "run":
             from medicine_sanity import preflight, scan
             preflight(runtime)
         print("本地证据目录：" + str(runtime.output), flush=True)
         navigate(runtime, args.stage, args.start_at)
         def observe():
-            report = runtime.run([{"type": "Custom", "params": {"task_names": [PREFIX + STAGES[args.stage]]}}], "probe")
+            report = runtime.run([probe_task(args.stage)], "probe")
             return read_probe(report, args.stage)
         def fight(parameters):
             report = runtime.run([{"type": "Fight", "params": {"stage": args.stage, **parameters}}], "fight")
@@ -405,11 +427,11 @@ def main(argv=None) -> int:
                 report = runtime.run([task], "medicine-bulk")
                 return inspect_recovery(report, args.stage, policy["medicine_expire_days"], parameters["times"])
             result = run_daily(observe, fight, recover,
-                               lambda: scan(runtime, args.stage, policy["medicine_expire_days"]),
+                               lambda: scan(runtime, args.stage, policy["medicine_expire_days"], cost=cost),
                                lambda r: write_json(runtime.output / "result.json", r), policy=policy,
                                cost=cost, maximum=args.maximum, max_phases=args.max_phases, max_runs=args.max_runs)
-        result.update(stage=args.stage, cost=cost, probe_policy="cn-supply-joint-v1",
-                      navigation_policy="cn-shortcut-v1" if args.start_at == "auto" else "explicit-start-v1",
+        result.update(stage=args.stage, cost=cost, probe_policy="cn-standard-joint-v2",
+                      navigation_policy="native-isolated-stop-v1" if args.start_at != "prepared" else "prepared-v1",
                       end_at=("prepared" if result["status"] in {"completed", "observed"}
                               else result.get("medicine_check", {}).get("end_at", "unknown")))
         result["observed_at"] = dt.datetime.now(dt.timezone.utc).isoformat()

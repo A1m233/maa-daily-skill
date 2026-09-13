@@ -4,7 +4,7 @@
 - 官方来源：下文链接的 MaaCore v6.17.1 源码。
 - 边界：新统一流程仅源码与离线验证；历史真实样本不能替代新流程实测。
 
-本页拥有用药偏好、固定倍率恢复与收尾检测的契约。执行入口统一为 `drain_sanity.py run`；关卡和游戏日由既有原生选关 task 决定，不复制星期表、不切号、不领奖。当前导航支持国服 AP-5/CE-6/LS-6，芯片等库存目标不能直接套用。
+本页拥有用药偏好、固定倍率恢复与收尾检测的契约。执行入口统一为 `drain_sanity.py run`；关卡和游戏日由既有原生选关 task 决定，不复制星期表、不切号、不领奖。标准关卡的原生隔离导航、参数化准备页与 `--cost` 来源见[接入指南](drain-integration.md)；芯片等库存目标不能直接套用清体力语义。
 
 ## 持久化两种选择
 
@@ -21,7 +21,7 @@
 
 ## 一次调用
 
-先执行 `daily_checks.py prepare` 部署捆绑资源；Skill 更新不等于资源已部署，冲突拒绝覆盖。`run` 在导航前核对药物检查资源，两模式都需要它。
+先执行 `daily_checks.py prepare` 部署捆绑资源；Skill 更新不等于资源已部署，冲突拒绝覆盖。`run` 在导航前核对药物检查资源，两模式都需要它。未知关卡的已核实 `--cost` 同时传递给收尾检测，不另猜成本。
 
 ```text
 python <skill-root>/scripts/drain_sanity.py run --policy <本机策略.toml> --stage AP-5 --profile <profile> --maa <maa-executable> --output-dir <local-evidence> --maximum 10 --max-runs 100 --max-phases 5

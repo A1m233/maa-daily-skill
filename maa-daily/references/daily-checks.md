@@ -112,7 +112,7 @@ python <skill-root>/scripts/daily_checks.py stage-cost --stage LS-6
 
 ## 清体力日常
 
-需要把下面的“读取→计算→执行→重读”串成一次调用时，使用[既有任务接入指南](drain-integration.md)中的 `drain_sanity.py`。它目前是限定资源关卡的候选，不自动修改既有 business task，也不把未经 smoke 的导航当成生产能力。
+需要把下面的“读取→计算→执行→重读”串成一次调用时，使用[既有任务接入指南](drain-integration.md)中的 `drain_sanity.py`。它接受标准关卡名，复用隔离的原生导航与参数化准备页核验；已有限验证 AP-5、PR-D-2、1-7 只导航，不自动修改既有 business task，也不把 dry-run 或局部 smoke 当成所有关卡的生产能力。
 
 目标是当前授权资源用尽后，余额不足目标关卡单场消耗，不要求余额为零。普通自然理智和用药后的理智使用同一模型；芯片等次数/库存目标只参考本节，不默认清空理智。
 

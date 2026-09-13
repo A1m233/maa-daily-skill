@@ -78,43 +78,17 @@ class DrainTests(unittest.TestCase):
             self.assertEqual(result["reason"], reason)
             self.assertLessEqual(len(fights), 1)
 
-    def test_navigation_has_no_fight_and_probe_resources_only_observe(self):
-        for stage in drain.STAGES:
+    def test_navigation_uses_guarded_native_fight_and_prepared_skips(self):
+        for stage in ("AP-5", "1-7", "PR-D-2", "TO-5"):
             tasks = drain.navigation_tasks(stage, "home")
-            self.assertEqual([t["type"] for t in tasks], ["Custom", "Custom"])
-            self.assertEqual(tasks[-1]["params"]["task_names"], [stage])
+            self.assertEqual([t["type"] for t in tasks], ["Fight"])
+            self.assertEqual(tasks[0]["params"]["stage"], stage)
+            self.assertEqual(tasks[0]["params"]["times"], 1)
+            self.assertTrue(all(tasks[0]["params"][k] == 0 for k in ("medicine", "medicine_expire_days", "stone")))
             self.assertEqual(drain.navigation_tasks(stage, "prepared"), [])
-        with self.assertRaises(ValueError):
-            drain.navigation_tasks("Annihilation", "home")
-        nodes = json.loads((ROOT / "maa-daily/assets/drain-sanity/tasks.json").read_text(encoding="utf-8"))
-        for name in drain.STAGES.values():
-            node = nodes[drain.PREFIX + name]
-            self.assertEqual(node["action"], "DoNothing")
-            self.assertTrue(node["fullMatch"])
-
-    def test_auto_navigation_is_closed_bounded_and_only_clicks_navigation(self):
-        nodes = json.loads((ROOT / "maa-daily/assets/drain-sanity/tasks.json").read_text(encoding="utf-8"))
-        allowed_clicks = {"NavMenuOpen", "NavMenuEntry", "NavConfirm", "NavHomeTerminal"}
-        for stage in drain.STAGES:
-            entry = drain.navigation_tasks(stage)[0]["params"]["task_names"][0]
-            pending, visited = [entry], set()
-            while pending:
-                name = pending.pop()
-                if name in visited:
-                    continue
-                visited.add(name)
-                node = nodes[name]
-                self.assertNotIn("baseTask", node)  # No inherited battle/error branches.
-                self.assertEqual(node["maxTimes"], 1)
-                self.assertLessEqual(set(node) & {"sub", "onErrorNext", "exceededNext"}, set())
-                if node["action"] == "ClickSelf":
-                    self.assertIn(name.removeprefix(drain.PREFIX), allowed_clicks)
-                    self.assertEqual(node["algorithm"], "MatchTemplate")
-                else:
-                    self.assertEqual(node["action"], "DoNothing")
-                pending.extend(node["next"])
-            parents = [n for n in visited if drain.PREFIX + "NavConfirm" in nodes[n]["next"]]
-            self.assertEqual(parents, [drain.PREFIX + "NavMenuEntry"])
+        for stage in ("Annihilation", "1-7@StartButton1", "H10-1-Hard", "../../x"):
+            with self.assertRaises(ValueError):
+                drain.navigation_tasks(stage)
 
     def test_auto_navigation_routes_simulated_screens_without_home_roundtrip(self):
         nodes = json.loads((ROOT / "maa-daily/assets/drain-sanity/tasks.json").read_text(encoding="utf-8"))
@@ -132,36 +106,35 @@ class DrainTests(unittest.TestCase):
         self.assertNotIn(drain.PREFIX + "NavConfirm", entry["next"])
         self.assertTrue(all(nodes[n]["algorithm"] != "JustReturn" for n in entry["next"]))
 
-    def test_navigation_requires_observed_endpoint_in_matching_chain(self):
-        def body(endpoint, action="DoNothing"):
-            return (event("TaskChainStart", taskchain="Custom") +
-                    event("SubTaskCompleted", taskchain="Custom", first=[drain.PREFIX + "NavVerifyAP5"],
-                          details={"task": endpoint, "action": action}) +
-                    event("TaskChainCompleted", taskchain="Custom"))
+    def test_navigation_requires_native_stop_and_completed_stage_navigation(self):
+        def body(action="Stop", stage_done=True):
+            return (event("TaskChainStart") +
+                    (event("SubTaskCompleted", subtask="StageNavigationTask", details={}) if stage_done else "") +
+                    event("SubTaskStart", details={"task": "FightBegin", "action": action}) +
+                    event("TaskChainCompleted"))
         with tempfile.TemporaryDirectory() as directory:
-            for node, result in (("NavTerminal", "terminal"), ("NavReadyVerifyAP5", "prepared")):
-                self.assertEqual(drain.read_navigation(self.report(directory, body(node)), "AP-5"), result)
-            for content in (body("NavMenuOpen", "ClickSelf"), body("NavReadyVerifyCE6"),
-                            body("NavTerminal", "ClickSelf"), body("NavTerminal").replace('"taskid": 1', '"taskid": 2', 1)):
+            self.assertEqual(drain.read_navigation(self.report(directory, body()), "1-7"), "prepared")
+            for text in (body("DoNothing"), body(stage_done=False),
+                         body() + event("SubTaskExtraInfo", what="UseMedicine"),
+                         body() + event("SubTaskStart", details={"task": "StartButton2", "action": "ClickSelf"})):
                 with self.assertRaises(ValueError):
-                    drain.read_navigation(self.report(directory, content), "AP-5")
+                    drain.read_navigation(self.report(directory, text), "1-7")
 
-    def test_default_cli_auto_never_fights_without_probe_and_routes_prepared(self):
+    def test_default_cli_never_starts_battle_without_independent_probe(self):
         with tempfile.TemporaryDirectory() as directory:
-            for endpoint in ("prepared", "terminal"):
-                with patch.object(drain, "Runtime") as factory, patch.object(drain, "callbacks"), \
-                        patch.object(drain, "read_navigation", return_value=endpoint), \
-                        patch.object(drain, "read_probe", side_effect=ValueError("sanity_unverified")), \
-                        patch("medicine_sanity.preflight"), \
-                        contextlib.redirect_stdout(io.StringIO()):
-                    runtime = factory.return_value
-                    runtime.output, runtime.reports = Path(directory), []
-                    runtime.run.return_value = {"evidence": {}}
-                    self.assertEqual(drain.main(["run", "--stage", "AP-5", "--profile", "test",
-                                                "--output-dir", directory]), 2)
-                    phases = [c.args[1] for c in runtime.run.call_args_list]
-                    self.assertEqual(phases, ["navigation"] + (["stage-navigation"] if endpoint == "terminal" else []) + ["probe"])
-                    self.assertTrue(all(t["type"] == "Custom" for c in runtime.run.call_args_list for t in c.args[0]))
+            with patch.object(drain, "Runtime") as factory, patch.object(drain, "callbacks"), \
+                    patch.object(drain, "read_navigation", return_value="prepared"), \
+                    patch.object(drain, "read_probe", side_effect=ValueError("sanity_unverified")), \
+                    patch("medicine_sanity.preflight"), contextlib.redirect_stdout(io.StringIO()):
+                runtime = factory.return_value
+                runtime.output, runtime.reports = Path(directory), []
+                runtime.run.return_value = {"evidence": {}}
+                self.assertEqual(drain.main(["run", "--stage", "1-7", "--profile", "test",
+                                            "--output-dir", directory]), 2)
+                calls = runtime.run.call_args_list
+                self.assertEqual([c.args[1] for c in calls], ["navigation", "probe"])
+                self.assertTrue(calls[0].kwargs["navigation"])
+                self.assertEqual(calls[1].args[0][0]["type"], "Custom")
 
     def test_auto_navigation_failure_does_not_probe_or_retry(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(drain, "Runtime") as factory, \
@@ -180,6 +153,7 @@ class DrainTests(unittest.TestCase):
             root = Path(directory)
             (root / "resource/tasks").mkdir(parents=True)
             nodes = json.loads((ROOT / "maa-daily/assets/daily-checks/tasks.json").read_text(encoding="utf-8"))
+            nodes.pop(drain.PREFIX + "SanityConfirm")
             nodes.update({k: v for k, v in json.loads((ROOT / "maa-daily/assets/drain-sanity/tasks.json").read_text(encoding="utf-8")).items()
                           if not k.startswith(drain.PREFIX + "Nav")})
             (root / "resource/tasks/tasks.json").write_text(json.dumps(nodes), encoding="utf-8")
@@ -304,7 +278,7 @@ class DrainTests(unittest.TestCase):
                 self.assertEqual(run.call_count, 1)
                 self.assertEqual(run.call_args.args[0][-1], "--dry-run")
             task = json.loads(next((root / "tasks").glob("*.json")).read_text(encoding="utf-8"))
-            self.assertTrue(all(t["type"] == "Custom" for t in task["tasks"]))
+            self.assertEqual(task["tasks"], drain.navigation_tasks("AP-5", "home"))
 
 
 if __name__ == "__main__":

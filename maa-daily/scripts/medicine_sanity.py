@@ -10,7 +10,8 @@ import re
 import subprocess
 
 from daily_checks import stage_cost
-from drain_sanity import Runtime, STAGES, PREFIX, callbacks, navigate, read_probe, write_json
+from drain_sanity import Runtime, callbacks, navigate, read_probe, write_json
+from stage_runtime import normalize_stage, probe_task
 from medicine_policy import load_policy
 from reward_check import OCR_ITEM
 
@@ -91,11 +92,10 @@ def preflight(runtime) -> None:
             raise ValueError("medicine_resource_missing_or_changed: " + key)
 
 
-def scan(runtime, stage: str, days: int, *, dialog_open: bool = False) -> dict:
+def scan(runtime, stage: str, days: int, *, dialog_open: bool = False, cost: int | None = None) -> dict:
     if not dialog_open:
-        sanity = read_probe(runtime.run([{"type": "Custom", "params": {
-            "task_names": [PREFIX + STAGES[stage]]}}], "medicine-precondition"), stage)
-        if sanity >= stage_cost(stage):
+        sanity = read_probe(runtime.run([probe_task(stage)], "medicine-precondition"), stage)
+        if sanity >= stage_cost(stage, cost):
             raise ValueError("medicine_scan_requires_below_one_run")
     entry = "Dialog" if dialog_open else "Open"
     report = runtime.run([{"type": "Custom", "params": {"task_names": [MP + entry]}}], "medicine-scan")
@@ -106,8 +106,7 @@ def scan(runtime, stage: str, days: int, *, dialog_open: bool = False) -> dict:
     if (len(actions) != 1 or actions[0].get("task", "").removeprefix(MP) != "Close"
             or actions[0].get("action") != "ClickRect"):
         raise ValueError("medicine_close_unverified")
-    read_probe(runtime.run([{"type": "Custom", "params": {
-        "task_names": [PREFIX + STAGES[stage]]}}], "medicine-return-probe"), stage)
+    read_probe(runtime.run([probe_task(stage)], "medicine-return-probe"), stage)
     result["end_at"] = "prepared"
     return result
 
@@ -116,7 +115,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="只读临期药窗口检查；清体力统一使用 drain_sanity.py run。")
     parser.add_argument("mode", choices=["check"])
     parser.add_argument("--policy", type=Path, required=True)
-    parser.add_argument("--stage", choices=list(STAGES), required=True)
+    parser.add_argument("--stage", required=True)
+    parser.add_argument("--cost", type=int, help="未收录关卡的已核实单场理智")
     parser.add_argument("--profile", required=True)
     parser.add_argument("--maa", default="maa")
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -124,13 +124,16 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     runtime = None
     try:
+        args.stage = normalize_stage(args.stage)
+        cost = stage_cost(args.stage, args.cost)
         policy = load_policy(args.policy)
         runtime = Runtime(args.maa, args.profile, args.output_dir)
+        runtime.configure_stage(args.stage)
         preflight(runtime)
         print("本地证据目录：" + str(runtime.output), flush=True)
         if not args.dialog_open:
             navigate(runtime, args.stage)
-        result = scan(runtime, args.stage, policy["medicine_expire_days"], dialog_open=args.dialog_open)
+        result = scan(runtime, args.stage, policy["medicine_expire_days"], dialog_open=args.dialog_open, cost=cost)
         result.update(observed_at=dt.datetime.now(dt.timezone.utc).isoformat(), stage=args.stage)
         write_json(runtime.output / "result.json", result)
         print(json.dumps(result, ensure_ascii=False))

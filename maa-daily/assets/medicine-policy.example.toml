@@ -1,0 +1,7 @@
+# 伴随策略：放在 MAA 配置目录的 policies/ 下，不放进原生 tasks/。
+# mode: off（不用临期药）、use_and_drain（授权范围内用药并清理智）。
+# 两模式都收尾检测；天数为正整数，沿用 MAA 定义，off 时仅用于提醒。
+# 这是参考，不代表用户授权。源石和普通药预算始终为零。
+[expiring_medicine]
+mode = "off"
+medicine_expire_days = 1

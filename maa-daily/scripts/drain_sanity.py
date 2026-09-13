@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded, no-recovery supply-stage draining through maa-cli and evidence runner."""
+"""Bounded supply-stage draining, optional native fixed-series medicine phase."""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +15,7 @@ import tempfile
 import uuid
 
 from daily_checks import inspect_report, plan, stage_cost
+from medicine_policy import load_policy, validate_policy, recovery_task, inspect_recovery
 
 STAGES = {"AP-5": "VerifyAP5", "CE-6": "VerifyCE6", "LS-6": "VerifyLS6"}
 PREFIX = "MaaDailyCheck@"
@@ -199,14 +200,102 @@ def drain(observe, fight, save, *, cost: int, maximum: int, max_phases: int, max
             result["remaining_sanity"] = remaining
             result["last_known_sanity"] = remaining
             result["phases"][-1].update(status="completed", sanity_after=remaining)
+            # fight() 已核验实际正场次；升级/自然回复可能抵消消耗。
+            # 不猜上涨原因，重新计算；总场次和阶段预算限制重复执行。
             if remaining >= sanity:
-                raise ValueError("sanity_not_decreasing")
+                result["phases"][-1]["sanity_non_decreasing"] = True
             sanity = remaining
             save(result)
         if sanity < cost:
             result.update(status="completed", reason="below_one_run")
         else:
             raise ValueError("phase_budget_exceeded")
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+        result.update(status="stopped", reason=str(error))
+        if result["phases"] and result["phases"][-1]["status"] == "running":
+            result["phases"][-1].update(status="unverified", reason=str(error))
+    save(result)
+    return result
+
+
+def run_daily(observe, fight, recover, check, save, *, policy, cost, maximum, max_phases, max_runs):
+    """一个清理入口；recover 返回已核验场次/用药，不用库存猜倍率。"""
+    policy = validate_policy(policy)
+    plan(0, cost, maximum)
+    if type(max_runs) is not int or type(max_phases) is not int or min(max_runs, max_phases) < 1:
+        raise ValueError("positive_bounds_required")
+    result = {"status": "running", "policy": policy, "completed_runs": 0, "medicine_used": 0,
+              "medicine_goal": "unknown" if policy["mode"] == "use_and_drain" else "not_requested",
+              "remaining_sanity": None, "last_known_sanity": None, "phases": [],
+              "medicine_check": {"status": "unknown", "reason": "not_checked", "reminder_required": True},
+              "reminder_required": True}
+    save(result)
+    try:
+        sanity = observe()
+        result.update(remaining_sanity=sanity, last_known_sanity=sanity)
+        plan(sanity, cost, maximum)  # 校验初始读数，即使用药也先读数。
+        phases_left = max_phases
+        if policy["mode"] == "use_and_drain":
+            limit = max_runs // maximum * maximum
+            if limit < maximum:
+                raise ValueError("budget_below_full_medicine_batch")
+            params = {"series": maximum, "times": limit, "medicine": 0,
+                      "medicine_expire_days": policy["medicine_expire_days"], "stone": 0}
+            result["phases"].append({"kind": "medicine_bulk", "status": "running",
+                                     "sanity_before": sanity, "params": params})
+            result["remaining_sanity"] = None
+            save(result)
+            used = recover(params)
+            count, bottles = used["completed_runs"], used["medicine_used"]
+            if (type(count) is not int or not 0 <= count <= limit or count % maximum
+                    or type(bottles) is not int or bottles < 0):
+                raise ValueError("invalid_native_bulk_result")
+            result.update(completed_runs=count, medicine_used=bottles)
+            result["phases"][-1].update(status="completed", **used)
+            save(result)  # 后续读数失败也保留已确认用药。
+            sanity = observe()
+            plan(sanity, cost, maximum)
+            result.update(remaining_sanity=sanity, last_known_sanity=sanity)
+            result["phases"][-1]["sanity_after"] = sanity
+            phases_left -= 1
+            # 满额退出不是理智不足；不能静默把用药目标改成无药补尾。
+            if count == limit:
+                raise ValueError("medicine_run_budget_reached")
+            if count == 0 and bottles == 0:
+                result["phases"][-1]["no_resource_progress"] = True
+            # 即使零战斗但吃过药，也仅重读补尾；不重试固定十连。
+        if sanity >= cost:
+            if phases_left < 1:
+                raise ValueError("phase_budget_exceeded")
+            budget = max_runs - result["completed_runs"]
+            if budget < 1:
+                raise ValueError("run_budget_exceeded")
+            base_count = result["completed_runs"]
+            base_phases = list(result["phases"])
+            def checkpoint(tail):
+                result.update(completed_runs=base_count + tail["completed_runs"],
+                              remaining_sanity=tail["remaining_sanity"],
+                              last_known_sanity=tail["last_known_sanity"],
+                              phases=base_phases + tail["phases"])
+                save(result)
+            # 首次使用刚取得的初始/恢复后读数，之后每场阶段再独立读取。
+            # 两次调用之间没有游戏动作，不重复启动同一准备页检查。
+            first_read = [sanity]
+            def tail_observe():
+                return first_read.pop() if first_read else observe()
+            tail = drain(tail_observe, fight, checkpoint, cost=cost, maximum=maximum,
+                         max_phases=phases_left, max_runs=budget)
+            if tail["status"] != "completed":
+                raise ValueError(tail["reason"])
+        result.update(status="completed", reason="below_one_run")
+        save(result)
+        try:
+            result["medicine_check"] = check()
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+            result["medicine_check"] = {"status": "unknown", "reason": str(error), "reminder_required": True}
+        result["reminder_required"] = result["medicine_check"].get("reminder_required", True)
+        if result["reminder_required"]:
+            result["status"] = "completed_with_reminder"
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         result.update(status="stopped", reason=str(error))
         if result["phases"] and result["phases"][-1]["status"] == "running":
@@ -260,8 +349,23 @@ class Runtime:
         return report
 
 
+def navigate(runtime, stage: str, start_at: str = "auto") -> None:
+    nav = navigation_tasks(stage, start_at)
+    if not nav:
+        return
+    report = runtime.run(nav, "navigation")
+    callbacks(report)
+    if report["evidence"].get("internal_error_lines"):
+        raise ValueError("navigation_has_errors")
+    if start_at == "auto" and read_navigation(report, stage) == "terminal":
+        report = runtime.run(navigation_tasks(stage, "terminal"), "stage-navigation")
+        callbacks(report)
+        if report["evidence"].get("internal_error_lines"):
+            raise ValueError("navigation_has_errors")
+
+
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="候选清体力组件：仅 AP-5/CE-6/LS-6，无药、无源石；不切号、不领奖。")
+    parser = argparse.ArgumentParser(description="统一清体力：固定倍率、可选临期药、收尾检查；不切号、不领奖。")
     parser.add_argument("mode", choices=["probe", "run"])
     parser.add_argument("--stage", choices=list(STAGES), required=True)
     parser.add_argument("--start-at", choices=["auto", "home", "terminal", "prepared"], default="auto",
@@ -273,25 +377,20 @@ def main(argv=None) -> int:
     parser.add_argument("--maximum", type=int, default=10)
     parser.add_argument("--max-phases", type=int, default=5)
     parser.add_argument("--max-runs", type=int, default=100)
+    parser.add_argument("--policy", type=Path, help="两模式临期药策略；省略时不用药，收尾检查范围为原生 1")
     args = parser.parse_args(argv)
     if args.mode == "run" and (not 1 <= args.maximum <= 10
                                or args.max_phases < 1 or args.max_runs < 1):
         parser.error("run requires positive budgets, maximum in 1..10")
     try:
         cost = stage_cost(args.stage, args.cost)  # 在目录发现、导航或任何游戏操作前拦截错误成本。
+        policy = load_policy(args.policy) if args.policy else {"mode": "off", "medicine_expire_days": 1}
         runtime = Runtime(args.maa, args.profile, args.output_dir)
+        if args.mode == "run":
+            from medicine_sanity import preflight, scan
+            preflight(runtime)
         print("本地证据目录：" + str(runtime.output), flush=True)
-        nav = navigation_tasks(args.stage, args.start_at)
-        if nav:
-            report = runtime.run(nav, "navigation")
-            callbacks(report)
-            if report["evidence"].get("internal_error_lines"):
-                raise ValueError("navigation_has_errors")
-            if args.start_at == "auto" and read_navigation(report, args.stage) == "terminal":
-                report = runtime.run(navigation_tasks(args.stage, "terminal"), "stage-navigation")
-                callbacks(report)
-                if report["evidence"].get("internal_error_lines"):
-                    raise ValueError("navigation_has_errors")
+        navigate(runtime, args.stage, args.start_at)
         def observe():
             report = runtime.run([{"type": "Custom", "params": {"task_names": [PREFIX + STAGES[args.stage]]}}], "probe")
             return read_probe(report, args.stage)
@@ -301,20 +400,27 @@ def main(argv=None) -> int:
         if args.mode == "probe":
             result = {"status": "observed", "sanity": observe(), "stage": args.stage}
         else:
-            result = drain(observe, fight, lambda r: write_json(runtime.output / "result.json", r),
-                           cost=cost, maximum=args.maximum, max_phases=args.max_phases, max_runs=args.max_runs)
+            def recover(parameters):
+                task = recovery_task(args.stage, policy, parameters["series"], parameters["times"])
+                report = runtime.run([task], "medicine-bulk")
+                return inspect_recovery(report, args.stage, policy["medicine_expire_days"], parameters["times"])
+            result = run_daily(observe, fight, recover,
+                               lambda: scan(runtime, args.stage, policy["medicine_expire_days"]),
+                               lambda r: write_json(runtime.output / "result.json", r), policy=policy,
+                               cost=cost, maximum=args.maximum, max_phases=args.max_phases, max_runs=args.max_runs)
         result.update(stage=args.stage, cost=cost, probe_policy="cn-supply-joint-v1",
                       navigation_policy="cn-shortcut-v1" if args.start_at == "auto" else "explicit-start-v1",
-                      end_at="prepared" if result["status"] in {"completed", "observed"} else "unknown")
+                      end_at=("prepared" if result["status"] in {"completed", "observed"}
+                              else result.get("medicine_check", {}).get("end_at", "unknown")))
         result["observed_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
         result["warning_report_files"] = [r["report_file"] for r in runtime.reports
                                           if r.get("internal_error_lines") or r.get("subtask_error_lines")
                                           or r.get("runner_exit_code") or r.get("report_error")]
         write_json(runtime.output / "result.json", result)
         print(json.dumps(result, ensure_ascii=False))
-        return 0 if result["status"] in {"completed", "observed"} else 2
+        return 0 if result["status"] in {"completed", "completed_with_reminder", "observed"} else 2
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
-        print(json.dumps({"status": "stopped", "reason": str(error)}, ensure_ascii=False))
+        print(json.dumps({"status": "stopped", "reason": str(error), "reminder_required": True}, ensure_ascii=False))
         return 2
 
 

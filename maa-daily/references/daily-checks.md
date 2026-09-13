@@ -16,6 +16,7 @@ python <skill-root>/scripts/daily_checks.py prepare --config-dir <MAA_CONFIG_DIR
 这个写入动作需要配置修改授权：合并自带 `assets/daily-checks/tasks.json` 到用户资源，创建理智、奖励页、通用页面 OCR 和完整档位扫描四个原生检查 task。保留其他键，对不一致的同名键/文件拒绝覆盖；用户资源有变化时先保留备份。同一配置根下没有并发写入者时使用，失败后检查输出和备份，不删除整个目录重试。脚本不修改 profile；按现有原生配置启用 `resource.user_resource = true`，不覆盖连接信息。
 
 同时合并 `assets/drain-sanity/tasks.json` 的目标关卡确认及自动导航节点，供[动态清体力候选组件](drain-integration.md)使用；部署这些节点不代表导航或战斗已经通过真实验证。
+同时部署 `assets/medicine-check/tasks.json`，供[统一临期药流程](expiring-medicine.md)使用；新增资源需重新 prepare，不能把 Skill 更新等同于用户资源已更新。
 
 检查仍通过 maa-cli 和薄 runner 执行：
 
@@ -130,7 +131,7 @@ python <skill-root>/scripts/daily_checks.py plan --sanity <S> --stage LS-6 --max
 - `N >= M`：`series=M, times=q*M`，不给额外的不足理智最大批次尝试。
 - 每阶段结束重新观察理智，再调用计算器；输出的余数只是估计，不能直接排队执行。自然回复、升级或药物都会改变余额。
 
-`plan` 明确只适用于无后续恢复预算阶段，输出的普通药、临期药和源石预算均为零。仍需使用授权药物时，先按[原生配置](native-config.md)处理并核验恢复阶段，不能把当前 `N=0` 当成资源目标已经完成。不要把一次预算重复带入多个生成 task。
+`plan` 明确只适用于无后续恢复预算阶段，输出的普通药、临期药和源石预算均为零。仍需使用授权临期药时，通过[统一清体力入口](expiring-medicine.md)处理并核验固定倍率恢复阶段，不能把当前 `N=0` 当成资源目标已经完成。不要把一次预算重复带入多个生成 task。
 
 没有可信理智读数时保留未知。检查原型未验证或起点不满足时，不机械强制它；使用已有经过验证的批量后读终态补尾路径，或在明确范围内验证原生 AUTO。不能将缺失输入默认为零。
 

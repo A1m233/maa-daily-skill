@@ -1,0 +1,26 @@
+{
+  "MaaDailyMedicine@Open": {
+    "algorithm": "OcrDetect", "text": ["开始行动"], "fullMatch": true,
+    "roi": [1010, 625, 260, 61], "action": "ClickSelf", "postDelay": 3000,
+    "maxTimes": 1, "next": ["MaaDailyMedicine@Dialog"]
+  },
+  "MaaDailyMedicine@Dialog": {
+    "algorithm": "MatchTemplate", "template": "UseMedicine.png", "templThreshold": 0.7,
+    "roi": [580, 50, 400, 100], "action": "DoNothing", "maxTimes": 1,
+    "next": ["MaaDailyMedicine@ExpiryA"]
+  },
+  "MaaDailyMedicine@ExpiryA": {
+    "algorithm": "OcrDetect", "text": [], "roi": [0, 0, 1280, 720],
+    "action": "DoNothing", "postDelay": 700, "maxTimes": 1,
+    "next": ["MaaDailyMedicine@ExpiryB"]
+  },
+  "MaaDailyMedicine@ExpiryB": {
+    "algorithm": "OcrDetect", "text": [], "roi": [0, 0, 1280, 720],
+    "action": "DoNothing", "maxTimes": 1, "next": []
+  },
+  "MaaDailyMedicine@Close": {
+    "algorithm": "MatchTemplate", "template": "UseMedicine.png", "templThreshold": 0.7,
+    "roi": [580, 50, 400, 100], "action": "ClickRect", "specificRect": [0, 200, 300, 400],
+    "postDelay": 1000, "maxTimes": 1, "next": []
+  }
+}

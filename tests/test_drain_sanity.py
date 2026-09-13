@@ -13,6 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "maa-daily/scripts"))
 import drain_sanity as drain
+import medicine_sanity
 sys.path.pop(0)
 
 
@@ -69,7 +70,7 @@ class DrainTests(unittest.TestCase):
 
     def test_stop_on_failure_no_progress_and_budgets(self):
         for readings, options, reason in [([205], {"failure": True}, "failed_fight"),
-                ([205, 205], {}, "sanity_not_decreasing"),
+                ([205, 205], {"max_phases": 1}, "phase_budget_exceeded"),
                 ([943], {"cost": 12, "max_runs": 10}, "run_budget_exceeded"),
                 ([943, 103], {"cost": 12, "max_phases": 1}, "phase_budget_exceeded")]:
             result, fights, _ = self.run_loop(readings, **options)
@@ -151,6 +152,7 @@ class DrainTests(unittest.TestCase):
                 with patch.object(drain, "Runtime") as factory, patch.object(drain, "callbacks"), \
                         patch.object(drain, "read_navigation", return_value=endpoint), \
                         patch.object(drain, "read_probe", side_effect=ValueError("sanity_unverified")), \
+                        patch("medicine_sanity.preflight"), \
                         contextlib.redirect_stdout(io.StringIO()):
                     runtime = factory.return_value
                     runtime.output, runtime.reports = Path(directory), []
@@ -163,6 +165,7 @@ class DrainTests(unittest.TestCase):
 
     def test_auto_navigation_failure_does_not_probe_or_retry(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(drain, "Runtime") as factory, \
+                patch("medicine_sanity.preflight"), \
                 contextlib.redirect_stdout(io.StringIO()):
             runtime = factory.return_value
             runtime.output = Path(directory)

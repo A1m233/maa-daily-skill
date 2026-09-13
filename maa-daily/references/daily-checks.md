@@ -15,7 +15,7 @@ python <skill-root>/scripts/daily_checks.py prepare --config-dir <MAA_CONFIG_DIR
 
 这个写入动作需要配置修改授权：合并自带 `assets/daily-checks/tasks.json` 到用户资源，创建理智、奖励页、通用页面 OCR 和完整档位扫描四个原生检查 task。保留其他键，对不一致的同名键/文件拒绝覆盖；用户资源有变化时先保留备份。同一配置根下没有并发写入者时使用，失败后检查输出和备份，不删除整个目录重试。脚本不修改 profile；按现有原生配置启用 `resource.user_resource = true`，不覆盖连接信息。
 
-同时合并 `assets/drain-sanity/tasks.json` 的三个目标关卡确认节点，供[动态清体力候选组件](drain-integration.md)使用；部署这些节点不代表导航或战斗已经通过真实验证。
+同时合并 `assets/drain-sanity/tasks.json` 的目标关卡确认及自动导航节点，供[动态清体力候选组件](drain-integration.md)使用；部署这些节点不代表导航或战斗已经通过真实验证。
 
 检查仍通过 maa-cli 和薄 runner 执行：
 

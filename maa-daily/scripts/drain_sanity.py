@@ -51,13 +51,44 @@ def callbacks(report: dict) -> list[tuple[str, dict]]:
     return events
 
 
-def navigation_tasks(stage: str, start_at: str) -> list[dict]:
-    if stage not in STAGES or start_at not in {"home", "terminal", "prepared"}:
+def navigation_tasks(stage: str, start_at: str = "auto") -> list[dict]:
+    if stage not in STAGES or start_at not in {"auto", "home", "terminal", "prepared"}:
         raise ValueError("unsupported_navigation")
+    if start_at == "auto":
+        return [{"type": "Custom", "params": {"task_names": [PREFIX + "Nav" + STAGES[stage]]}}]
     names = (["Terminal-Entry"] if start_at == "home" else [])
     if start_at != "prepared":
         names.append(stage)
     return [{"type": "Custom", "params": {"task_names": [name]}} for name in names]
+
+
+def read_navigation(report: dict, stage: str) -> str:
+    """Consume only this process's bounded navigation endpoint, never LLM page guesses."""
+    events = callbacks(report)
+    chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
+    if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Custom")
+            or chains[1][:2] != ("TaskChainCompleted", "Custom") or chains[0][2] != chains[1][2]):
+        raise ValueError("ambiguous_navigation_chain")
+    nodes = json.loads((Path(__file__).resolve().parents[1] / "assets/drain-sanity/tasks.json").read_text(encoding="utf-8"))
+    completed = []
+    for kind, value in events:
+        if kind not in {"SubTaskStart", "SubTaskCompleted"}:
+            continue
+        detail = value.get("details", {})
+        name = PREFIX + detail.get("task", "").removeprefix(PREFIX)
+        spec = nodes.get(name, {})
+        if (value.get("first") != [PREFIX + "Nav" + STAGES[stage]]
+                or value.get("taskid") != chains[0][2] or value.get("taskchain") != "Custom"
+                or not name.startswith(PREFIX + "Nav") or not spec
+                or detail.get("action") != spec.get("action", "DoNothing")):
+            raise ValueError("unexpected_navigation_action_or_origin")
+        if kind == "SubTaskCompleted":
+            completed.append(name)
+    if completed and completed[-1] == PREFIX + "NavReady" + STAGES[stage]:
+        return "prepared"  # Only a routing hint; full stage/button/sanity probe still mandatory.
+    if completed and completed[-1] == PREFIX + "NavTerminal":
+        return "terminal"
+    raise ValueError("navigation_endpoint_unverified")
 
 
 def valid_ocr(match: dict, text: str, minimum: float, roi: tuple) -> bool:
@@ -194,7 +225,7 @@ class Runtime:
         resource = json.loads((self.config / "resource/tasks/tasks.json").read_text(encoding="utf-8-sig"))
         for file in (assets / "daily-checks/tasks.json", assets / "drain-sanity/tasks.json"):
             for key, value in json.loads(file.read_text(encoding="utf-8")).items():
-                if key.startswith(PREFIX + "Verify") or key in {PREFIX + s for s in ("StagePage", "Sanity", "SanityConfirm")}:
+                if key.startswith((PREFIX + "Verify", PREFIX + "Nav")) or key in {PREFIX + s for s in ("StagePage", "Sanity", "SanityConfirm")}:
                     if resource.get(key) != value:
                         raise ValueError("probe_resource_missing_or_changed: " + key)
         output.mkdir(parents=True, exist_ok=True)
@@ -233,7 +264,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="候选清体力组件：仅 AP-5/CE-6/LS-6，无药、无源石；不切号、不领奖。")
     parser.add_argument("mode", choices=["probe", "run"])
     parser.add_argument("--stage", choices=list(STAGES), required=True)
-    parser.add_argument("--start-at", choices=["home", "terminal", "prepared"], required=True)
+    parser.add_argument("--start-at", choices=["auto", "home", "terminal", "prepared"], default="auto",
+                        help="默认 auto：由 MAA 导航并确认起点；旧显式起点仅供诊断兼容")
     parser.add_argument("--maa", default="maa")
     parser.add_argument("--profile", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -255,6 +287,11 @@ def main(argv=None) -> int:
             callbacks(report)
             if report["evidence"].get("internal_error_lines"):
                 raise ValueError("navigation_has_errors")
+            if args.start_at == "auto" and read_navigation(report, args.stage) == "terminal":
+                report = runtime.run(navigation_tasks(args.stage, "terminal"), "stage-navigation")
+                callbacks(report)
+                if report["evidence"].get("internal_error_lines"):
+                    raise ValueError("navigation_has_errors")
         def observe():
             report = runtime.run([{"type": "Custom", "params": {"task_names": [PREFIX + STAGES[args.stage]]}}], "probe")
             return read_probe(report, args.stage)
@@ -266,7 +303,9 @@ def main(argv=None) -> int:
         else:
             result = drain(observe, fight, lambda r: write_json(runtime.output / "result.json", r),
                            cost=cost, maximum=args.maximum, max_phases=args.max_phases, max_runs=args.max_runs)
-        result.update(stage=args.stage, cost=cost, probe_policy="cn-supply-joint-v1")
+        result.update(stage=args.stage, cost=cost, probe_policy="cn-supply-joint-v1",
+                      navigation_policy="cn-shortcut-v1" if args.start_at == "auto" else "explicit-start-v1",
+                      end_at="prepared" if result["status"] in {"completed", "observed"} else "unknown")
         result["observed_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
         result["warning_report_files"] = [r["report_file"] for r in runtime.reports
                                           if r.get("internal_error_lines") or r.get("subtask_error_lines")

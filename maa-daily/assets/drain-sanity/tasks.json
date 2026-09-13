@@ -1,4 +1,59 @@
 {
+  "MaaDailyCheck@NavVerifyAP5": {
+    "algorithm": "JustReturn", "action": "DoNothing", "maxTimes": 1,
+    "next": ["MaaDailyCheck@NavReadyVerifyAP5", "MaaDailyCheck@NavMenuEntry", "MaaDailyCheck@NavMenuOpen", "MaaDailyCheck@NavTerminal", "MaaDailyCheck@NavHomeTerminal"]
+  },
+  "MaaDailyCheck@NavVerifyCE6": {
+    "algorithm": "JustReturn", "action": "DoNothing", "maxTimes": 1,
+    "next": ["MaaDailyCheck@NavReadyVerifyCE6", "MaaDailyCheck@NavMenuEntry", "MaaDailyCheck@NavMenuOpen", "MaaDailyCheck@NavTerminal", "MaaDailyCheck@NavHomeTerminal"]
+  },
+  "MaaDailyCheck@NavVerifyLS6": {
+    "algorithm": "JustReturn", "action": "DoNothing", "maxTimes": 1,
+    "next": ["MaaDailyCheck@NavReadyVerifyLS6", "MaaDailyCheck@NavMenuEntry", "MaaDailyCheck@NavMenuOpen", "MaaDailyCheck@NavTerminal", "MaaDailyCheck@NavHomeTerminal"]
+  },
+  "MaaDailyCheck@NavReadyVerifyAP5": {
+    "algorithm": "OcrDetect", "text": ["AP-5"], "fullMatch": true,
+    "isAscii": true, "roi": [845, 72, 220, 50], "action": "DoNothing", "next": [], "maxTimes": 1
+  },
+  "MaaDailyCheck@NavReadyVerifyCE6": {
+    "algorithm": "OcrDetect", "text": ["CE-6"], "fullMatch": true,
+    "isAscii": true, "roi": [845, 72, 220, 50], "action": "DoNothing", "next": [], "maxTimes": 1
+  },
+  "MaaDailyCheck@NavReadyVerifyLS6": {
+    "algorithm": "OcrDetect", "text": ["LS-6"], "fullMatch": true,
+    "isAscii": true, "roi": [845, 72, 220, 50], "action": "DoNothing", "next": [], "maxTimes": 1
+  },
+  "MaaDailyCheck@NavMenuOpen": {
+    "algorithm": "MatchTemplate", "template": "QuickSwitch/Menu.png",
+    "roi": [197, 0, 144, 134], "templThreshold": 0.7, "maskRange": [150, 255],
+    "action": "ClickSelf", "postDelay": 500, "maxTimes": 1,
+    "next": ["MaaDailyCheck@NavMenuEntry"]
+  },
+  "MaaDailyCheck@NavMenuEntry": {
+    "algorithm": "MatchTemplate", "template": "QuickSwitch/Terminal.png",
+    "roi": [450, 0, 159, 148], "templThreshold": 0.7, "maskRange": [150, 255],
+    "action": "ClickSelf", "postDelay": 1500, "maxTimes": 1,
+    "next": ["MaaDailyCheck@NavTerminal", "MaaDailyCheck@NavConfirm"]
+  },
+  "MaaDailyCheck@NavConfirm": {
+    "Doc": "仅在本链已点击快捷菜单终端后可达，不从未知页面直接确认弹窗。",
+    "algorithm": "MatchTemplate", "template": "PopupConfirm.png", "roi": [630, 400, 650, 160],
+    "action": "ClickSelf", "postDelay": 1500, "maxTimes": 1,
+    "next": ["MaaDailyCheck@NavTerminal"]
+  },
+  "MaaDailyCheck@NavTerminal": {
+    "algorithm": "MatchTemplate", "template": "StageResource.png",
+    "roi": [462, 600, 140, 120], "templThreshold": 0.65,
+    "action": "DoNothing", "next": [], "maxTimes": 1
+  },
+  "MaaDailyCheck@NavHomeTerminal": {
+    "Doc": "沿用官方首页终端模板，不继承其主题切换或其它后继动作。",
+    "algorithm": "MatchTemplate",
+    "template": ["Default/Terminal.png", "Dark/Terminal.png", "Sami/Terminal.png", "MistCity/Terminal.png", "Siege/Terminal.png", "Sarkaz/Terminal.png", "Delicious/Terminal.png", "Gaming/Terminal.png", "DahuangCity/Terminal.png", "Dreamland/Day/Terminal.png", "Dreamland/Night/Terminal.png", "JieGarden/Terminal.png", "AveMujica/Terminal.png", "Together/Terminal.png", "LoneTrail/Day/Terminal.png", "LoneTrail/Night/Terminal.png", "Reconstruct/Terminal.png", "Hunting/Terminal.png"],
+    "roi": [844, 58, 268, 272], "maskRange": [1, 255],
+    "action": "ClickSelf", "postDelay": 3000, "maxTimes": 1,
+    "next": ["MaaDailyCheck@NavTerminal"]
+  },
   "MaaDailyCheck@VerifyAP5": {
     "algorithm": "OcrDetect", "text": ["AP-5"], "fullMatch": true,
     "isAscii": true, "roi": [845, 72, 220, 50], "action": "DoNothing",

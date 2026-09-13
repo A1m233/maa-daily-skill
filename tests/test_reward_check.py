@@ -35,16 +35,18 @@ class RewardCheckTests(unittest.TestCase):
                 pages = {"RewardTopA": items(sample["top"]), "RewardTopB": items(sample["top"]),
                          "RewardBottomA": items(sample["bottom"]), "RewardBottomB": items(sample["bottom_repeat"])}
                 result = check.classify(pages)
-                self.assertEqual(sample["claimed"], result["claimed_tiers"])
-                self.assertEqual(10-sample["claimed"], result["unclaimed_tiers"])
+                self.assertEqual(sample["claimed"], result["claimed_tiers_min"])
+                self.assertEqual(10-sample["claimed"], result["unclaimed_tiers_max"])
+                self.assertEqual(10, result["claimed_tiers_max"])
 
     def test_synthetic_thresholds_and_deduplication(self):
         for count in range(1, 11):
             result = check.classify(pages_for(count))
-            self.assertEqual(count, result["claimed_tiers"])
+            self.assertEqual(count, result["claimed_tiers_min"])
+            self.assertEqual(count if count == 10 else None, result["claimed_tiers"])
             self.assertEqual(count < 9, result["reminder_required"])
-            self.assertEqual("claimed" if count >= 7 else "not_claimed", result["daily_orundum"])
-            self.assertEqual("claimed" if count >= 9 else "not_claimed", result["daily_annihilation_ticket"])
+            self.assertEqual("claimed" if count >= 7 else "unknown", result["daily_orundum"])
+            self.assertEqual("claimed" if count >= 9 else "unknown", result["daily_annihilation_ticket"])
         self.assertEqual("unknown", check.classify(pages_for(0))["status"])
 
     def test_fail_closed_on_missing_unstable_shifted_and_low_confidence(self):
@@ -69,7 +71,7 @@ class RewardCheckTests(unittest.TestCase):
             else:
                 pages["RewardTopA"][0]["text"] = "已完戎"
             with self.subTest(mutation=mutation):
-                self.assertTrue(check.classify(pages)["reminder_required"])
+                self.assertEqual(mutation != "hole", check.classify(pages)["reminder_required"])
                 self.assertIsNone(check.classify(pages)["claimed_tiers"])
 
     def test_overlap_resolves_only_with_two_reliable_other_endpoint_reads(self):
@@ -77,7 +79,7 @@ class RewardCheckTests(unittest.TestCase):
         for phase in ("RewardBottomA", "RewardBottomB"):
             pages[phase][2].update(text="!完成", score=0.76)
         result = check.classify(pages)
-        self.assertEqual(result["claimed_tiers"], 9)
+        self.assertEqual(result["claimed_tiers_min"], 9)
         self.assertEqual(len(result["resolved_ambiguities"]), 2)
         self.assertNotIn(6, result["observed_claimed"]["RewardBottomA"])
         self.assertIn(6, result["visible_claimed"]["RewardBottomA"])
@@ -97,6 +99,46 @@ class RewardCheckTests(unittest.TestCase):
                 bad["RewardBottomA"].append(copy.deepcopy(bad["RewardBottomA"][2]))
             with self.subTest(mutation=mutation):
                 self.assertEqual(check.classify(bad)["status"], "unknown")
+
+    def test_completed_substring_in_reward_region_and_negative_exclusions(self):
+        pages = pages_for(10)
+        for phase in check.PHASES[2:]:
+            pages[phase][1].update(text="]完成", score=0.836506)
+            pages[phase][4].update(text="完成", score=0.999839)
+        result = check.classify(pages)
+        self.assertEqual(result["claimed_tiers"], 10)
+        self.assertFalse(result["reminder_required"])
+        for text in ("未完成", "尚未完成", "没有完成", "可领取"):
+            bad = copy.deepcopy(pages)
+            bad["RewardBottomA"][4]["text"] = text
+            self.assertEqual(check.classify(bad)["status"], "unknown")
+        for phase in check.PHASES[2:]:
+            pages[phase][4]["rect"][0] = 800
+        self.assertEqual(check.classify(pages)["status"], "unknown")
+
+    def test_uncertainty_preserves_supported_reward_conclusions(self):
+        for count, orundum, ticket in [(9, "claimed", "claimed"),
+                                       (8, "claimed", "unknown"), (6, "unknown", "unknown")]:
+            pages = pages_for(count)
+            result = check.classify(pages)
+            self.assertEqual(result["claimed_tiers_min"], count)
+            self.assertEqual(result["claimed_tiers_max"], 10)
+            self.assertEqual(result["daily_orundum"], orundum)
+            self.assertEqual(result["daily_annihilation_ticket"], ticket)
+            self.assertIsNone(result["claimed_tiers"])
+        for text, score in [("已完戎", 0.99), ("完成", 0.6)]:
+            pages = pages_for(10)
+            for phase in check.PHASES[2:]:
+                pages[phase][4].update(text=text, score=score)
+            result = check.classify(pages)
+            self.assertEqual(result["claimed_tiers_min"], 9)
+            self.assertEqual(result["uncertain_positions"], [8])
+            self.assertEqual(result["daily_annihilation_ticket"], "claimed")
+
+    def test_blank_reads_never_prove_zero_claimed(self):
+        result = check.classify({phase: [] for phase in check.PHASES})
+        self.assertEqual(result["status"], "unknown")
+        self.assertIsNone(result["claimed_tiers_min"])
 
     def test_bounded_runtime_protocol(self):
         def event(name, value):

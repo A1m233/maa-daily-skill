@@ -29,6 +29,8 @@ OCR_ITEM = re.compile(
 def unknown(reason: str) -> dict:
     return {"layout": LAYOUT, "status": "unknown", "reason": reason,
             "claimed_tiers": None, "unclaimed_tiers": None,
+            "claimed_tiers_min": None, "claimed_tiers_max": None,
+            "unclaimed_tiers_min": None, "unclaimed_tiers_max": None,
             "daily_orundum": "unknown", "daily_annihilation_ticket": "unknown",
             "reminder_required": True, "message": "无法确认每日合成玉及剿灭扫荡券是否已领取。"}
 
@@ -49,7 +51,7 @@ def classify(pages: dict[str, list[dict]]) -> dict:
         rows, ambiguous = set(), set()
         for item in items:
             text = item["text"].strip()
-            negative = text in {"未完成", "未领取", "未解锁", "可领取"}
+            negative = any(token in text for token in ("未完成", "未领取", "未解锁", "可领取", "尚未", "没有完成", "不完成"))
             if not negative and text != "已完成" and "已" not in text and "完成" not in text:
                 continue
             x, y, w, h = item["rect"]
@@ -66,7 +68,7 @@ def classify(pages: dict[str, list[dict]]) -> dict:
                 return unknown("invalid_marker_score")
             if row in rows or row in ambiguous:
                 return unknown("duplicate_row_marker")
-            if text == "已完成" and 0.8 <= item["score"] <= 1:
+            if "完成" in text and 0.8 <= item["score"] <= 1:
                 rows.add(row)
             else:
                 ambiguous.add(row)
@@ -78,11 +80,10 @@ def classify(pages: dict[str, list[dict]]) -> dict:
     for phase, rows in uncertain.items():
         other = PHASES[2:] if phase.startswith("RewardTop") else PHASES[:2]
         for row in sorted(rows):
-            if row not in range(3, 7) or not all(row in sets[p] and row not in uncertain[p] for p in other):
-                return unknown("unresolved_completed_marker")
-            resolved.append({"phase": phase, "position": row+1, "supported_by": list(other)})
-    for phase, rows in uncertain.items():
-        sets[phase] |= rows
+            if row in range(3, 7) and all(row in sets[p] and row not in uncertain[p] for p in other):
+                resolved.append({"phase": phase, "position": row+1, "supported_by": list(other)})
+    for item in resolved:
+        sets[item["phase"]].add(item["position"]-1)
     if sets[PHASES[0]] != sets[PHASES[1]] or sets[PHASES[2]] != sets[PHASES[3]]:
         return unknown("endpoint_not_stable")
     top, bottom = sets[PHASES[0]], sets[PHASES[2]]
@@ -92,25 +93,32 @@ def classify(pages: dict[str, list[dict]]) -> dict:
     claimed = top | bottom
     if not claimed:
         return unknown("no_positive_marker")
-    if claimed != set(range(min(claimed), TOTAL)):
-        return unknown("non_contiguous_claimed_rows")
-    count = len(claimed)
-    orundum = "claimed" if count >= 7 else "not_claimed"
-    ticket = "claimed" if count >= 9 else "not_claimed"
+    # Positive markers establish a lower bound. Missing or unreadable text is
+    # not negative evidence, even if both reads omit the same position.
+    lower, upper = len(claimed), TOTAL
+    exact = lower == upper
+    count = lower if exact else None
+    orundum = "claimed" if lower >= 7 else "unknown"
+    ticket = "claimed" if lower >= 9 else "unknown"
     missing = []
     if orundum != "claimed":
         missing.append("每日合成玉")
     if ticket != "claimed":
         missing.append("剿灭扫荡券")
-    message = f"每日奖励已领 {count}/10 档，剩余 {TOTAL-count} 档。"
-    message += ("尚未领取：" + "、".join(missing) + "。") if missing else "每日合成玉及剿灭扫荡券对应档位已领取。"
-    return {"layout": LAYOUT, "status": "evaluated", "reason": "stable_tier_geometry",
-            "claimed_tiers": count, "unclaimed_tiers": TOTAL-count,
+    message = (f"每日奖励已领 {count}/10 档，剩余 0 档。" if exact
+               else f"每日奖励至少已领 {lower}/10 档，已领范围 {lower}–{upper} 档，未领范围 0–{TOTAL-lower} 档。")
+    message += ("无法确认是否已领取：" + "、".join(missing) + "。") if missing else "每日合成玉及剿灭扫荡券对应档位已领取。"
+    return {"layout": LAYOUT, "status": "evaluated", "reason": "stable_tier_geometry" if exact else "bounded_positive_markers",
+            "count_precision": "exact" if exact else "bounded",
+            "claimed_tiers": count, "unclaimed_tiers": 0 if exact else None,
+            "claimed_tiers_min": lower, "claimed_tiers_max": upper,
+            "unclaimed_tiers_min": 0, "unclaimed_tiers_max": TOTAL-lower,
             "daily_orundum": orundum, "daily_annihilation_ticket": ticket,
             "reminder_required": bool(missing), "message": message,
             "basis": "tier-state inference, not inventory delta",
             "visible_claimed": {key: sorted(row+1 for row in value) for key, value in sets.items()},
-            "observed_claimed": observed, "resolved_ambiguities": resolved}
+            "observed_claimed": observed, "resolved_ambiguities": resolved,
+            "uncertain_positions": sorted(row+1 for row in set(range(TOTAL)) - claimed)}
 
 
 def game_day(instant: dt.datetime) -> str:

@@ -201,7 +201,7 @@ MaaCore 的 `Completed` 或 maa-cli summary 中的完成状态，首先表示对
 
 任一项不是 claimed，都必须明确提醒用户：能确认缺失时说明“尚未拿到哪项奖励及原因”；识别失败时说明“无法确认哪项是否领取”。不要把 unknown 写成确定没领，也不能省略提醒或称日常全部完成。检查或补领奖失败保留原失败，不自动重跑日常；补刷、吃药、购买或其他资源动作仍需原授权覆盖。
 
-复用[检查组件](daily-checks.md)的 `reward_check.py scan`，不要临时编写识别或累计逻辑。已验证的国服十档适配器根据稳定档位计数推断两项奖励，输出 claimed / not_claimed / unknown；not_claimed 不区分可领未领和未达成，必须提醒而不能自行补刷。不符合该布局、没有完整扫描或结果未知时，不借助 Completed 强行补齐。`Award.orundum` 控制活动幸运墙，不是每日合成玉开关；日常/周常领取由 `Award.award` 控制。
+复用[检查组件](daily-checks.md)的 `reward_check.py scan`，不要临时编写识别或累计逻辑。国服十档适配器用稳定正向标记的数量下界分别证明两项奖励已领；下界不足时返回 unknown，不把没读到文字当成 not_claimed。精确数量未知但下界达到相应档位时，仍可确认该项 claimed。存在可靠未领证据的其他核验方式仍可报告 not_claimed，不区分可领未领和未达成时明确说明；不得自行补刷。不符合布局、没有完整扫描时，不借助 Completed 强行补齐。`Award.orundum` 控制活动幸运墙，不是每日合成玉开关；日常/周常领取由 `Award.award` 控制。
 
 ### Depot 库存结果的有效性
 

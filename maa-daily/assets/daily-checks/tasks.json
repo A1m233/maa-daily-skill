@@ -1,4 +1,37 @@
 {
+  "MaaDailyCheck@RewardNav": {
+    "algorithm": "JustReturn", "action": "DoNothing", "maxTimes": 1,
+    "next": ["MaaDailyCheck@RewardNavReady", "MaaDailyCheck@RewardNavHome", "MaaDailyCheck@RewardNavMenuEntry", "MaaDailyCheck@RewardNavMenuOpen"]
+  },
+  "MaaDailyCheck@RewardNavReady": {
+    "algorithm": "OcrDetect", "text": ["日常任务"],
+    "roi": [480, 0, 800, 65], "action": "DoNothing", "next": [], "maxTimes": 1
+  },
+  "MaaDailyCheck@RewardNavHome": {
+    "baseTask": "Award", "template": "SwitchTheme@ToggleSettingsMenu.png",
+    "action": "DoNothing", "sub": ["MaaDailyCheck@RewardNavTask-Entry"],
+    "next": ["MaaDailyCheck@RewardNavReady"], "onErrorNext": [], "exceededNext": [], "maxTimes": 1
+  },
+  "MaaDailyCheck@RewardNavTask-Entry": {
+    "baseTask": "Task-Entry", "action": "DoNothing", "onErrorNext": [], "maxTimes": 1
+  },
+  "MaaDailyCheck@RewardNavMenuOpen": {
+    "baseTask": "QuickSwitch@ToHome@Open", "template": "QuickSwitch/Menu.png",
+    "action": "ClickSelf",
+    "next": ["MaaDailyCheck@RewardNavMenuEntry"], "onErrorNext": [], "exceededNext": [], "maxTimes": 1
+  },
+  "MaaDailyCheck@RewardNavMenuEntry": {
+    "baseTask": "QuickSwitch@ToHome@Entry", "template": "QuickSwitch/Home.png",
+    "action": "ClickSelf",
+    "postDelay": 1500, "next": ["MaaDailyCheck@RewardNavHome", "MaaDailyCheck@RewardNavConfirm"],
+    "onErrorNext": [], "exceededNext": [], "maxTimes": 1
+  },
+  "MaaDailyCheck@RewardNavConfirm": {
+    "baseTask": "QuickSwitch@Confirm", "template": "PopupConfirm.png",
+    "action": "ClickSelf",
+    "postDelay": 1500, "next": ["MaaDailyCheck@RewardNavHome"],
+    "onErrorNext": [], "exceededNext": [], "maxTimes": 1
+  },
   "MaaDailyCheck@RewardScan": {
     "algorithm": "OcrDetect", "text": ["日常任务"], "roi": [480, 0, 800, 65],
     "action": "ClickSelf", "postDelay": 1200, "next": ["MaaDailyCheck@RewardTopReset"], "maxTimes": 1

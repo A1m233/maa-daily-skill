@@ -9,6 +9,7 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 
 ## 按需读取资料
 
+- 分段日常的统一执行、避免剿灭后漏清体力：读 [references/daily-execution.md](references/daily-execution.md)，使用 `daily_run.py` 引用已有 task。账号身份和设备仍由外层核验，不自动恢复或切号。
 - 首次创建或重新整理任务：先读 [references/create-task.md](references/create-task.md)，统一基线、提问与交付流程。
 - 清体力日常的倍率计算、理智预检查与奖励检查组件：读 [references/daily-checks.md](references/daily-checks.md)，复用捆绑脚本/原生 task，不临时手搓；特殊材料目标仅参考算法。
 - 基本关卡的单场理智从[关卡表](assets/stage-costs.json)或 `daily_checks.py stage-cost` 查询，不凭模型记忆填写；已收录关卡的计算与清体力脚本自动取值并拒绝冲突参数。
@@ -41,6 +42,8 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 执行状态、内部异常和业务结果分别判断，详见[结果分层与继续门槛](references/safety-and-results.md#执行状态内部异常与业务结果分层)。runner 零退出码不代表业务通过，内部 `SubTaskError` 也不自动代表整轮失败；下一阶段必须核验自身依赖的账号、界面、资源及业务前置，不能由 Agent 按节点名称忽略错误。
 
 ## 每账号收尾检查
+
+已经接入固定执行器的日常，由它依次运行前段、清体力、Award 和检查，Agent 读取完整阶段结果，不再手动省略或重排这些阶段。未接入时仍按下述清单执行；剿灭完成不能代替普通理智目标。`reward_check.py scan` 自己导航到任务页，不能把 Award 完成当作页面证明。
 
 每个账号结束业务执行后、切换下一个账号或关闭游戏前，必须按[每账号收尾清单](references/safety-and-results.md#每账号收尾清单)完成：理智目标核验 → 基建结果核验 → 最终领奖与关键奖励检查 → 未完成项提醒与账号结果记录。最后一个账号同样执行，再进行第 9 步的整体汇报闭环；不能等切号后再补当前账号的游戏侧检查。这项要求不依赖 task 是否由创建指南生成。
 

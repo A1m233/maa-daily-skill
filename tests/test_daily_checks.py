@@ -86,8 +86,8 @@ class DailyChecksTests(unittest.TestCase):
             if name == "MaaDailyCheck@RewardScan":
                 self.assertEqual(["日常任务"], effective["text"])
             elif effective["action"] == "ClickSelf":
-                self.assertEqual("DailyTask", node["baseTask"])
-            for child in node["next"]:
+                self.assertIn(node["baseTask"], ("DailyTask", "QuickSwitch@ToHome@Open", "QuickSwitch@ToHome@Entry", "QuickSwitch@Confirm"))
+            for child in node.get("next", []):
                 self.assertIn(child, resources)
         self.assertEqual([], resources["MaaDailyCheck@StagePage"]["sub"])
         self.assertEqual([], resources["MaaDailyCheck@StagePage"]["exceededNext"])

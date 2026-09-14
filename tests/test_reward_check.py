@@ -9,8 +9,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "maa-daily/scripts"))
 spec = importlib.util.spec_from_file_location("reward_check", ROOT / "maa-daily/scripts/reward_check.py")
 check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(check)
@@ -28,6 +30,35 @@ def pages_for(count):
 
 
 class RewardCheckTests(unittest.TestCase):
+    def test_navigation_requires_task_page_and_no_business_clicks(self):
+        from test_drain_sanity import DrainTests, event
+        fixture = DrainTests()
+        body = (event("TaskChainStart", taskchain="Custom") +
+                event("SubTaskCompleted", taskchain="Custom", details={"task": "RewardNavReady", "action": "DoNothing",
+                      "result": {"text": "t24/日常任务", "score": 0.91, "rect": [640, 11, 144, 40]}}) +
+                event("TaskChainCompleted", taskchain="Custom"))
+        with tempfile.TemporaryDirectory() as directory:
+            report = fixture.report(directory, body)
+            self.assertEqual(check.read_navigation(report)["end_at"], "task_page")
+            for bad in (body.replace(json.dumps("t24/日常任务"), json.dumps("周常任务")), body.replace("0.91", "0.5"),
+                        body.replace("640, 11", "640, 400"), body + event("SubTaskError"),
+                        body + event("SubTaskCompleted", taskchain="Custom", details={"task": "ReceiveAward", "action": "ClickSelf"})):
+                with self.assertRaises(ValueError):
+                    check.read_navigation(fixture.report(directory, bad))
+
+    def test_failed_navigation_never_scans_or_claims(self):
+        from subprocess import CompletedProcess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "tasks").mkdir()
+            with patch.object(check, "check_install", return_value=root), patch.object(check.subprocess, "run") as run:
+                run.side_effect = [CompletedProcess([], 0), CompletedProcess([], 1)]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    result, output = check.scan_once("maa", "example", root / "output")
+                self.assertEqual(result["reason"], "navigation_failed")
+                self.assertEqual(run.call_count, 2)
+                self.assertFalse((output / "evidence.json").exists())
+
     def test_measured_five_state_projection(self):
         data = json.loads((ROOT / "tests/fixtures/reward-tier-centers.json").read_text(encoding="utf-8"))
         for sample in data["samples"]:

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import uuid
 
 PREFIX = "MaaDailyCheck@"
 ENTRY = PREFIX + "RewardScan"
@@ -188,7 +189,7 @@ def evaluate(report: dict) -> dict:
     return result
 
 
-def check_install(executable: str) -> None:
+def check_install(executable: str) -> Path:
     query = subprocess.run([executable, "dir", "config", "--batch"], capture_output=True,
                            text=True, encoding="utf-8", errors="strict", check=True, timeout=30)
     config = Path(query.stdout.strip().splitlines()[-1])
@@ -204,6 +205,78 @@ def check_install(executable: str) -> None:
     for key, value in bundled.items():
         if key.startswith(PREFIX + "Reward") and resource.get(key) != value:
             raise ValueError(f"scan resource differs: {key}")
+    return config
+
+
+def read_navigation(report: dict) -> dict:
+    # Reuse bounded execution/hash checks, not the drain navigation policy.
+    from drain_sanity import callbacks
+    events = callbacks(report)
+    chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
+    if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Custom")
+            or chains[1][:2] != ("TaskChainCompleted", "Custom") or chains[0][2] != chains[1][2]):
+        raise ValueError("invalid_reward_navigation_chain")
+    ready = False
+    for kind, value in events:
+        if not kind.startswith("SubTask"):
+            continue
+        detail = value.get("details", {})
+        name = detail.get("task", "").split("@")[-1]
+        if value.get("taskchain") != "Custom" or value.get("taskid") != chains[0][2]:
+            raise ValueError("unexpected_reward_navigation_origin")
+        if value.get("what") in {"UseMedicine", "StageDrops", "FightTimes"}:
+            raise ValueError("unexpected_reward_navigation_business")
+        if detail.get("action") not in {None, "DoNothing", "Stop", "ClickSelf"}:
+            raise ValueError("unexpected_reward_navigation_action")
+        if detail.get("action") == "ClickSelf" and not (
+                name in {"RewardNavMenuOpen", "RewardNavMenuEntry", "RewardNavConfirm"}
+                or name.startswith("Task")):
+            raise ValueError("unexpected_reward_navigation_click")
+        if kind == "SubTaskCompleted" and name == "RewardNavReady":
+            match = detail.get("result", {})
+            rect = match.get("rect", [])
+            ready = (detail.get("action") == "DoNothing" and "日常任务" in match.get("text", "")
+                     and len(rect) == 4 and 480 <= rect[0] <= 1100 and 0 <= rect[1] <= 55
+                     and 0.9 <= match.get("score", 0) <= 1)
+    if not ready:
+        raise ValueError("reward_page_unverified")
+    return {"status": "verified", "end_at": "task_page"}
+
+
+def scan_once(maa: str, profile: str, output: Path) -> tuple[dict, Path]:
+    config = check_install(maa)
+    output.mkdir(parents=True, exist_ok=True)
+    run_dir = Path(tempfile.mkdtemp(prefix="reward-scan-", dir=output))
+    report_file = run_dir / "evidence.json"
+    nav_report = run_dir / "navigation.json"
+    name = "maa-reward-nav-" + uuid.uuid4().hex
+    nav_task = config / "tasks" / (name + ".json")
+    with nav_task.open("x", encoding="utf-8") as handle:
+        json.dump({"tasks": [{"type": "Custom", "params": {"task_names": [PREFIX + "RewardNav"]}}]}, handle)
+    (run_dir / "navigation-task.json").write_bytes(nav_task.read_bytes())
+    runner = str(Path(__file__).with_name("run_with_evidence.py"))
+    def execute(task, target):
+        command = [maa, "run", task, "--batch", "--profile", profile, "--user-resource"]
+        subprocess.run(command + ["--dry-run"], check=True)
+        return subprocess.run([sys.executable, "-B", runner, "--report-file", str(target), "--", *command]).returncode
+    result = unknown("navigation_failed")
+    try:
+        print("仅导航到任务页并扫描，不领取奖励。", flush=True)
+        if execute(name, nav_report):
+            raise ValueError("navigation_runner_failed")
+        nav = read_navigation(json.loads(nav_report.read_text(encoding="utf-8")))
+        result = unknown("scan_failed")
+        if execute(TASK, report_file):
+            result = unknown("scan_runner_failed")
+        else:
+            result = evaluate(json.loads(report_file.read_text(encoding="utf-8")))
+        result["navigation"] = nav
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+        result["error"] = str(error)
+    result["navigation_report"] = str(nav_report)
+    result["scan_report"] = str(report_file)
+    (run_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return result, run_dir
 
 
 def main(argv=None) -> int:
@@ -213,7 +286,7 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     replay = sub.add_parser("evaluate", help="只读评估已有报告，观察时间不代表当前状态")
     replay.add_argument("--report", type=Path, required=True)
-    scan = sub.add_parser("scan", help="先满足账号、可见窗口、设备与授权门禁；起点为任务页")
+    scan = sub.add_parser("scan", help="先满足账号、可见窗口、设备与授权门禁；自动导航到任务页")
     scan.add_argument("--maa", default="maa")
     scan.add_argument("--profile", required=True)
     scan.add_argument("--output-dir", type=Path, required=True, help="本地报告目录，每次建立独立子目录")
@@ -227,18 +300,7 @@ def main(argv=None) -> int:
                               "profile_checked": False, "game_state_checked": False}, ensure_ascii=False))
             return 0
         elif args.command == "scan":
-            check_install(args.maa)
-            args.output_dir.mkdir(parents=True, exist_ok=True)
-            run_dir = Path(tempfile.mkdtemp(prefix="reward-scan-", dir=args.output_dir))
-            report_file = run_dir / "evidence.json"
-            print("仅切换日常页、滚动并识别，不领取奖励。", flush=True)
-            code = subprocess.run([sys.executable, "-B", str(Path(__file__).with_name("run_with_evidence.py")),
-                                   "--report-file", str(report_file), "--", args.maa,
-                                   "run", TASK, "--batch", "--profile", args.profile], check=False).returncode
-            result = evaluate(json.loads(report_file.read_text(encoding="utf-8"))) if report_file.exists() else unknown("missing_report")
-            if code:
-                result = unknown("runner_failed")
-            (run_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            result, run_dir = scan_once(args.maa, args.profile, args.output_dir)
             print(f"结果目录：{run_dir}", flush=True)
         else:
             result = evaluate(json.loads(args.report.read_text(encoding="utf-8")))

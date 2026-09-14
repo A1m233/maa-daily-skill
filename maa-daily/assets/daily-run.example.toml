@@ -1,0 +1,11 @@
+# 单账号日常执行器配置，放在 MAA config/policies/，不要放 tasks/。
+# 仅引用已按用户偏好配置的原生任务；账号切换仍由官方 startup 完成。
+version = 1
+pre_tasks = ["daily-biz"]
+stage_task = "daily-stage"
+award_task = "daily-award"
+medicine_policy = "medicine-policy.toml"
+priority_goal = "weekly_cap" # 或 configured_runs；只对当天装配出的剿灭生效。
+maximum = 10
+max_runs = 100
+max_phases = 5

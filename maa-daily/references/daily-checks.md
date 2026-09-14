@@ -1,6 +1,6 @@
 # 日常检查与清体力组件
 
-- 最近核验日期：2026-09-11
+- 最近核验日期：2026-09-15
 - 官方来源：[流水线协议](https://docs.maa.plus/zh-cn/protocol/task-schema.html)、[FightTimesTaskPlugin v6.17.1](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Task/Fight/FightTimesTaskPlugin.cpp)、[任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
 - 相关实践：[ArknightsAutoHelper 奖励状态识别](https://github.com/ArknightsAutoHelper/ArknightsAutoHelper/blob/master/imgreco/task.py)。只借鉴状态识别思路；发布包不复制其图片或识别代码。
 - 边界：理智读取已通过一个账号关卡准备页的重复实测；奖励计数只覆盖下述已验证的国服十档布局，不代表所有客户端或未来布局。结果是奖励档位状态推断，不是背包增量，也不是任务点数统计。
@@ -46,13 +46,13 @@ python <skill-root>/scripts/reward_check.py --layout cn-daily-ten-v1 preflight -
 
 ## 奖励档位：一次调用完成扫描与判定
 
-先过账号身份、可见窗口、设备/profile 和运行授权门禁。起点必须是已登录账号的任务页；通常在最终 Award 后执行，若仍有“获得物资”等弹窗则先按已验证路径关闭，不让检查脚本猜测恢复。脚本不会启动游戏、切号、领奖、补刷或修改 profile。
+先过账号身份、可见窗口、设备/profile 和运行授权门禁。`scan` 自行导航到任务页，不要求 Agent 看屏幕或把 Award 结束页猜成任务页：邮件/活动领取可能把页面带离任务列表。导航复用官方首页任务入口和快捷返回模板，禁止领奖；已经在任务页时直接核验。未知弹窗、登录页或在途战斗不是自动恢复的许可，识别失败停止。脚本不会启动游戏、切号、领奖、补刷或修改 profile。
 
 ```text
 python <skill-root>/scripts/reward_check.py --layout cn-daily-ten-v1 scan --profile <profile> --output-dir <local-evidence-dir>
 ```
 
-`--maa <executable>` 可选择当前已核验的 maa-cli。脚本核对已部署的扫描 task 与用户资源和捆绑版本一致，调用薄 runner 包裹一个原生 `maa run maa-daily-reward-scan`，在独立本地子目录写 `evidence.json` 和 `result.json`。不要由 Agent 手工累计回调条数或重新编写同等扫描流程。
+`--maa <executable>` 可选择当前已核验的 maa-cli。脚本核对部署一致后，先经薄 runner 运行独立导航，再运行原生 `maa run maa-daily-reward-scan`，两者均先 dry-run。在独立本地子目录写 navigation.json、evidence.json 和 result.json；临时导航 task 保留用于审计。导航失败不会开始扫描，结果区分 navigation_failed 与 scan_runner_failed；档位算法不因导航变化放宽。不要由 Agent 手工累计回调条数或重新编写同等扫描流程。
 
 本适配器的显式前提：国服日常有十档，合成玉第七档、扫荡券第九档，已领取档位带“已完成”标记并排在未领取档位后面。映射由本次游戏现场与用户确认，不能外推为跨客户端永久协议。`cn-daily-ten-v1` 固定的是游戏界面布局，不含账号、设备或私人路径；其它布局需验证新的适配器，不随意改常量凑结果。
 
@@ -150,3 +150,5 @@ v6.17.1 的 `series=0` 新倍率路径，在初始状态优先选最大允许次
 完整脚本在相同环境、当前全领取状态真实执行成功，自动输出 10/10 和两项 claimed；没有 Agent 手工汇总，未执行领取或资源动作。多账号、其它主题/布局、零档和自然换日仍未真实覆盖；未知条件保持保守提醒。正式 business task 的战斗策略未修改，检查由最终 Award 后的这个独立进程承载。
 
 2026-09-11 的重叠消歧修订：两份既有完整扫描日志回放中，一端同一位置的乱码由另一端两次精确标记支持，均恢复为 9/10；另一个 8/10 样本保持不变。新增合成反例覆盖缺少支持、两端都歧义、错位、重复行和明确相反状态。修订后一次真实扫描完成全部节点，但没有正向标记，保守返回 unknown；这验证了扫描链与未知保护，不等于新消歧分支已经在现场重新复现。运行与用户数据只留本地。
+
+2026-09-15 奖励入口拆分为导航和扫描两个证据进程。首轮已进入任务页，但标签 OCR 带图标前缀，精确整串匹配误拦截；改为顶部限定区域包含“日常任务”且置信度至少 0.9 后复验。正式验收覆盖 mail=true 的 Award 回首页之后、任务页重复调用、AP-5 准备页三种起点，均完整扫描并返回 10/10。仅导航与识别，不增加领奖动作；这不证明任意弹窗/主题可恢复，档位计数阈值与上下界算法未改。

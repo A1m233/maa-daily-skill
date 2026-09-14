@@ -26,6 +26,8 @@ python <skill-root>/scripts/daily_run.py run --config <本机配置.toml> --maa 
 
 `preflight` 读取与 dry-run，不连接游戏、不部署资源；会建立本地证据/配置快照，不能称为零文件写入。先用 `daily_checks.py prepare` 部署资源，冲突按原流程处理，不自动覆盖。`run` 自己再次预检，不接受旧 preflight 作为运行许可。
 
+调用环境需要允许在实际 MAA config 根创建/删除协作锁、写输出快照，以及 maa-cli dry-run 所需的日志/缓存写入和可能的热更新网络；「不操作游戏」不等于文件系统只读或网络必定禁用。按实际拒绝信息申请最小权限，不绕过宿主门禁。只补清体力等独立阶段时，使用该组件的前置检查，不机械执行完整日常 preflight 来重新解析已完成前段。
+
 ## 固定顺序与停止点
 
 前段 → 优先任务核验 → 普通清体力 → 最终 Award → 基建/奖励检查。
@@ -46,6 +48,8 @@ python <skill-root>/scripts/daily_run.py run --config <本机配置.toml> --maa 
 ## 汇报与恢复
 
 `daily-result.json` 固定列出 pre / priority / drain / award / checks。没有执行的阶段保持 pending；失败阶段保留原因，不允许省略缺项后汇报完成。
+
+执行结束另产 `brief.json` / `brief.md`，按[用户简报](daily-summary.md)合并各组件提醒；公招保留标签通过日志提取，不只记录错误数量。前段中途失败仍保留已完成前段的公招明细。简报不改变阶段继续/停止条件。
 
 - completed：固定阶段完成且没有组件提醒；不是商店/基建全部游戏状态的额外断言。
 - completed_with_reminder：阶段执行完成，但有基建未知、药物库存未知或奖励区间不足等提醒。

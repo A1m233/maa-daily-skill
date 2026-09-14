@@ -103,6 +103,14 @@ class DailyTests(unittest.TestCase):
         self.assertEqual(result["tasks"][0]["business_result"], "not_evaluated")
         self.assertEqual(result["tasks"][0]["subtask_error_lines"], [12])
 
+    def test_later_pre_failure_preserves_recruit_business(self):
+        ops = Mock(day="2026-09-14", account="example")
+        ops.pre_observations = [{"type": "Recruit", "recruitment": {"pending": [{"outcome": "preserved"}]}}]
+        ops.pre.side_effect = ValueError("later_pre_failed")
+        result = daily.execute_flow(ops, lambda r: None)
+        self.assertEqual(result["steps"]["pre"]["tasks"], ops.pre_observations)
+        self.assertEqual(result["status"], "incomplete")
+
 
 if __name__ == "__main__":
     unittest.main()

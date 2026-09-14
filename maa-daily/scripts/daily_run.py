@@ -21,6 +21,8 @@ from medicine_sanity import preflight as medicine_preflight
 from reward_check import check_install, game_day, scan_once
 from run_with_evidence import classify_execution
 from stage_runtime import normalize_stage
+from recruit_check import inspect_report as inspect_recruit
+from daily_report import summarize
 
 HERE = Path(__file__).resolve().parent
 MARKER = "Assistant::append_callback | "
@@ -157,6 +159,9 @@ def execute_flow(ops, save) -> dict:
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         if result["steps"][current]["status"] == "running":
             result["steps"][current] = {"status": "unverified", "reason": str(error)}
+            partial = getattr(ops, "pre_observations", None)
+            if current == "pre" and isinstance(partial, list):
+                result["steps"][current]["tasks"] = partial
         result.update(status="incomplete", reason=str(error), reminder_required=True)
     result["missing_steps"] = [s for s, v in result["steps"].items()
                                if v["status"] not in {"completed", "completed_with_reminder", "not_scheduled"}]
@@ -238,6 +243,7 @@ class Daily:
 
     def pre(self):
         observations = []
+        self.pre_observations = observations
         for index, task in enumerate(self.before):
             self.check_day()
             report = self.native(task, "pre-" + str(index))
@@ -246,10 +252,13 @@ class Daily:
             observations.append({"type": task["type"], "execution": "completed", "business_result": "not_evaluated",
                                  "internal_error_lines": e.get("internal_error_lines", []),
                                  "subtask_error_lines": e.get("subtask_error_lines", [])})
+            if task["type"] == "Recruit":
+                observations[-1]["recruitment"] = inspect_recruit(report)
             # Priority may be embedded in a pre file; validate immediately, not after consuming normal sanity.
             if task["type"] == "Fight":
                 self.priority_reports.append(priority_result(report, task["params"], self.config["priority_goal"]))
-        warnings = any(v["internal_error_lines"] or v["subtask_error_lines"] for v in observations)
+        warnings = any(v["internal_error_lines"] or v["subtask_error_lines"]
+                       or v.get("recruitment", {}).get("reminder_required") for v in observations)
         return {"status": "completed_with_reminder" if warnings else "completed", "task_count": len(self.before),
                 "tasks": observations, "reminder_required": warnings, "reports": str(self.output / "processes.json")}
 
@@ -315,6 +324,9 @@ def main(argv=None):
             result = {"status": "prepared", "game_day": ops.day, "stage": ops.stage, "game_operated": False}
         else:
             result = execute_flow(ops, lambda r: write_json(ops.output / "daily-result.json", r))
+            brief = summarize(result)
+            write_json(ops.output / "brief.json", brief)
+            (ops.output / "brief.md").write_text(brief["text"] + "\n", encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result["status"] in {"prepared", "completed", "completed_with_reminder"} else 2
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:

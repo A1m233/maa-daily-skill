@@ -17,14 +17,14 @@
 
 配置保存在本机 MAA config/policies/ 下，不放进原生 tasks/，路径相对于该配置文件解析。它只引用正式入口与用药策略，不复制每个账号的业务、星期表或密码。配置不构成未来无人值守授权。
 
+调用 `run` 前必须先完成主 Skill 的[真实运行入口顺序](../SKILL.md#真实运行的入口顺序)：环境就绪 → 目标账号可信 → 单账号业务与收尾 → 满足继续条件后处理下一账号。执行器不承担前两步；`--account` 只是报告别名，不能充当身份断言。调用者须排除其它工具启动的 MAA 及会写同一日志的并发 dry-run。证据复用与失效、连接失败后的回溯也以该入口约定为准。
+
 ```text
 python <skill-root>/scripts/daily_run.py preflight --config <本机配置.toml> --maa <exe> --profile <profile> --account <本地别名> --output-dir <本地目录>
 python <skill-root>/scripts/daily_run.py run --config <本机配置.toml> --maa <exe> --profile <profile> --account <本地别名> --output-dir <本地目录>
 ```
 
-外层仍须确认模拟器窗口、设备/profile、无并发游戏操作者与可信账号。多账号先执行官方 startup 并检查本轮身份，再逐账号调用本执行器；`--account` 只是报告别名，不能充当身份断言。执行器不检查其它工具启动的 MAA 进程，调用者必须排除并发，包括会写 MaaCore 日志的 dry-run。
-
-`preflight` 读取与 dry-run，不连接游戏、不部署资源；会建立本地证据/配置快照，不能称为零文件写入。先用 `daily_checks.py prepare` 部署资源，冲突按原流程处理，不自动覆盖。`run` 自己再次预检，不接受旧 preflight 作为运行许可。
+`preflight` 读取与 dry-run，不连接游戏、不部署资源；会建立本地证据/配置快照，不能称为零文件写入。先用 `daily_checks.py prepare` 部署资源，冲突按原流程处理，不自动覆盖。`run` 自己再次预检，不接受旧 preflight 作为运行许可；两者都不提供设备在线或账号身份核验，不能因为执行器会在连接错误后停止，就用真实业务代替环境检查。
 
 调用环境需要允许在实际 MAA config 根创建/删除协作锁、写输出快照，以及 maa-cli dry-run 所需的日志/缓存写入和可能的热更新网络；「不操作游戏」不等于文件系统只读或网络必定禁用。按实际拒绝信息申请最小权限，不绕过宿主门禁。只补清体力等独立阶段时，使用该组件的前置检查，不机械执行完整日常 preflight 来重新解析已完成前段。
 

@@ -1,6 +1,6 @@
 # 日常检查与清体力组件
 
-- 最近核验日期：2026-09-15
+- 最近核验日期：2026-09-19
 - 官方来源：[流水线协议](https://docs.maa.plus/zh-cn/protocol/task-schema.html)、[FightTimesTaskPlugin v6.17.1](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Task/Fight/FightTimesTaskPlugin.cpp)、[任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
 - 相关实践：[ArknightsAutoHelper 奖励状态识别](https://github.com/ArknightsAutoHelper/ArknightsAutoHelper/blob/master/imgreco/task.py)。只借鉴状态识别思路；发布包不复制其图片或识别代码。
 - 边界：理智读取已通过一个账号关卡准备页的重复实测；奖励计数只覆盖下述已验证的国服十档布局，不代表所有客户端或未来布局。结果是奖励档位状态推断，不是背包增量，也不是任务点数统计。
@@ -52,7 +52,11 @@ python <skill-root>/scripts/reward_check.py --layout cn-daily-ten-v1 preflight -
 python <skill-root>/scripts/reward_check.py --layout cn-daily-ten-v1 scan --profile <profile> --output-dir <local-evidence-dir>
 ```
 
-`--maa <executable>` 可选择当前已核验的 maa-cli。脚本核对部署一致后，先经薄 runner 运行独立导航，再运行原生 `maa run maa-daily-reward-scan`，两者均先 dry-run。在独立本地子目录写 navigation.json、evidence.json 和 result.json；临时导航 task 保留用于审计。导航失败不会开始扫描，结果区分 navigation_failed 与 scan_runner_failed；档位算法不因导航变化放宽。不要由 Agent 手工累计回调条数或重新编写同等扫描流程。
+`--maa <executable>` 可选择当前已核验的 maa-cli。脚本核对部署一致后，先经薄 runner 运行独立导航，再运行原生 `maa run maa-daily-reward-scan`，两者均先 dry-run。在独立本地子目录写 navigation.json、evidence.json 和 result.json；临时 task 保留用于审计。结果区分 navigation_failed、page_verification_failed 与 scan_runner_failed；前两项失败不会开始档位扫描。不要由 Agent 手工累计回调条数或重新编写同等扫描流程。
+
+页面标签置信度至少 0.9 时保留快速路径；顶部正确区域包含“日常任务”且分数在 0.8–0.9 时，由组件自动追加**一次同页只读复核**，不再次导航：两次 DoNothing OCR 均须出现位置稳定的日常标签，以及高置信周常、主线标签，顺序和区域正确。同一游戏日内，导航至复核结束合计不超过三分钟。缺标签、错位、冲突、错误回调或更低分数仍停止，不能由 Agent 自行降阈值重试。复核报告为 `page-recheck.json`；此机制只核验页面，不改变档位标记阈值和上下界算法。
+
+新增 `RewardPageRecheckA/B` 资源后，更新 Skill 仍须经授权执行 `daily_checks.py prepare` 再 preflight；旧部署缺少节点时在操作游戏前拒绝，不静默绕过复核。
 
 本适配器的显式前提：国服日常有十档，合成玉第七档、扫荡券第九档，已领取档位带“已完成”标记并排在未领取档位后面。映射由本次游戏现场与用户确认，不能外推为跨客户端永久协议。`cn-daily-ten-v1` 固定的是游戏界面布局，不含账号、设备或私人路径；其它布局需验证新的适配器，不随意改常量凑结果。
 
@@ -152,3 +156,7 @@ v6.17.1 的 `series=0` 新倍率路径，在初始状态优先选最大允许次
 2026-09-11 的重叠消歧修订：两份既有完整扫描日志回放中，一端同一位置的乱码由另一端两次精确标记支持，均恢复为 9/10；另一个 8/10 样本保持不变。新增合成反例覆盖缺少支持、两端都歧义、错位、重复行和明确相反状态。修订后一次真实扫描完成全部节点，但没有正向标记，保守返回 unknown；这验证了扫描链与未知保护，不等于新消歧分支已经在现场重新复现。运行与用户数据只留本地。
 
 2026-09-15 奖励入口拆分为导航和扫描两个证据进程。首轮已进入任务页，但标签 OCR 带图标前缀，精确整串匹配误拦截；改为顶部限定区域包含“日常任务”且置信度至少 0.9 后复验。正式验收覆盖 mail=true 的 Award 回首页之后、任务页重复调用、AP-5 准备页三种起点，均完整扫描并返回 10/10。仅导航与识别，不增加领奖动作；这不证明任意弹窗/主题可恢复，档位计数阈值与上下界算法未改。
+
+2026-09-19 新增低分页面同页复核。既有日志区间哈希回放中，0.844952 的日常标签进入 recheck_required，而非直接拒绝或直接通过；合成测试覆盖稳定联合标签、缺失、错位、低分、跨日、哈希变化、复核失败停止及高分不追加进程。新增资源本机 prepare/preflight 和原生 dry-run 通过。
+
+同日 MaaCore 6.17.1 / maa-cli 0.7.5 / Windows MuMu 现场验证覆盖三个场景：从首页调用完整 scan 时自然出现 0.844952 标签，自动复核两次联合标签并进入四次档位扫描；任务页原地调用复核节点再次通过；隔离导航到 1-7 准备页后，直接运行同样的 DoNothing 复核节点，解析器以 page_recheck_features_unverified 正确拒绝。第三项是独立负例，不表示正式 scan 会跳过导航去复核错误页面。所有原报告区间哈希匹配；未切号、开战、用药或调用 Award，导航隔离报告的两条内部告警保留。当天档位扫描没有可靠正向标记，结果保持 no_positive_marker / 两项奖励 unknown，不把页面核验通过等同于奖励已领。仅覆盖当前国服布局，未增加新领取状态或其它主题的真值样本。

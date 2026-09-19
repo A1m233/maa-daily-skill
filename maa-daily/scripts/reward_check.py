@@ -17,6 +17,7 @@ import uuid
 PREFIX = "MaaDailyCheck@"
 ENTRY = PREFIX + "RewardScan"
 PHASES = ("RewardTopA", "RewardTopB", "RewardBottomA", "RewardBottomB")
+PAGE_READS = ("RewardPageRecheckA", "RewardPageRecheckB")
 LAYOUT = "cn-daily-ten-v1"
 TASK = "maa-daily-reward-scan"
 TOTAL = 10
@@ -210,13 +211,13 @@ def check_install(executable: str) -> Path:
 
 def read_navigation(report: dict) -> dict:
     # Reuse bounded execution/hash checks, not the drain navigation policy.
-    from drain_sanity import callbacks
+    from drain_sanity import callbacks, valid_ocr
     events = callbacks(report)
     chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
     if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Custom")
             or chains[1][:2] != ("TaskChainCompleted", "Custom") or chains[0][2] != chains[1][2]):
         raise ValueError("invalid_reward_navigation_chain")
-    ready = False
+    matches = []
     for kind, value in events:
         if not kind.startswith("SubTask"):
             continue
@@ -234,13 +235,88 @@ def read_navigation(report: dict) -> dict:
             raise ValueError("unexpected_reward_navigation_click")
         if kind == "SubTaskCompleted" and name == "RewardNavReady":
             match = detail.get("result", {})
-            rect = match.get("rect", [])
-            ready = (detail.get("action") == "DoNothing" and "日常任务" in match.get("text", "")
-                     and len(rect) == 4 and 480 <= rect[0] <= 1100 and 0 <= rect[1] <= 55
-                     and 0.9 <= match.get("score", 0) <= 1)
-    if not ready:
+            if (detail.get("action") != "DoNothing" or "日常任务" not in match.get("text", "")
+                    or not valid_ocr(match, match.get("text"), 0.8, (480, 0, 800, 65))):
+                raise ValueError("reward_page_unverified")
+            matches.append(match)
+    if len(matches) != 1:
         raise ValueError("reward_page_unverified")
-    return {"status": "verified", "end_at": "task_page"}
+    if matches[0]["score"] < 0.9:
+        return {"status": "recheck_required", "end_at": "unknown", "initial_match": matches[0]}
+    return {"status": "verified", "end_at": "task_page", "basis": "high_confidence_label"}
+
+
+def read_page_recheck(report: dict, navigation_report: dict) -> dict:
+    """低分候选只复读同页两次，要求相邻标签联合支持，不重复导航。"""
+    from drain_sanity import callbacks, valid_ocr
+    start = dt.datetime.fromisoformat(navigation_report["started_at"])
+    nav_end = dt.datetime.fromisoformat(navigation_report["ended_at"])
+    check_start = dt.datetime.fromisoformat(report["started_at"])
+    end = dt.datetime.fromisoformat(report["ended_at"])
+    if (any(t.tzinfo is None for t in (start, nav_end, check_start, end))
+            or not start <= nav_end <= check_start <= end
+            or (end-start).total_seconds() > 180 or game_day(start) != game_day(end)):
+        raise ValueError("page_recheck_time_boundary")
+    events = callbacks(report)
+    if report["evidence"].get("internal_error_lines"):
+        raise ValueError("page_recheck_internal_error")
+    chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
+    if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Custom")
+            or chains[1] != ("TaskChainCompleted", "Custom", chains[0][2])):
+        raise ValueError("invalid_page_recheck_chain")
+    done = []
+    for kind, value in events:
+        if not kind.startswith("SubTask"):
+            continue
+        detail = value.get("details", {})
+        name = detail.get("task", "").removeprefix(PREFIX)
+        if (kind not in {"SubTaskStart", "SubTaskCompleted"}
+                or value.get("taskchain") != "Custom" or value.get("taskid") != chains[0][2]
+                or value.get("first") != [PREFIX + PAGE_READS[0]]
+                or name not in PAGE_READS or detail.get("action") != "DoNothing"
+                or detail.get("algorithm") != "OcrDetect"):
+            raise ValueError("unexpected_page_recheck_action_or_origin")
+        if kind == "SubTaskCompleted":
+            done.append(name)
+    if done != list(PAGE_READS):
+        raise ValueError("incomplete_page_recheck")
+    evidence = report["evidence"]
+    with Path(evidence["log_file"]).open("rb") as handle:
+        handle.seek(evidence["before_size"])
+        data = handle.read(evidence["after_size"]-evidence["before_size"])
+    if hashlib.sha256(data).hexdigest() != evidence["interval_sha256"]:
+        raise ValueError("changed_log_interval")
+    pages = {}
+    for line in data.decode("utf-8").splitlines():
+        match = re.search(r"PipelineAnalyzer::analyze \| OcrDetect MaaDailyCheck@(RewardPageRecheck[AB]) (.*)$", line)
+        if match:
+            if match[1] in pages:
+                raise ValueError("duplicate_page_recheck")
+            pages[match[1]] = [{"text": i[0], "rect": list(map(int, i[1:5])), "score": float(i[5])}
+                             for i in OCR_ITEM.findall(match[2])]
+    if set(pages) != set(PAGE_READS):
+        raise ValueError("missing_page_recheck_ocr")
+    # 联合低分下限只用于页面标签，不用于档位或理智读数。
+    labels = {"日常任务": (0.8, (480, 0, 270, 65)),
+              "周常任务": (0.9, (700, 0, 245, 65)),
+              "主线任务": (0.9, (920, 0, 195, 65))}
+    recognized = []
+    for page in pages.values():
+        found = {}
+        for text, (minimum, roi) in labels.items():
+            candidates = [i for i in page if text in i["text"]]
+            if len(candidates) != 1 or not valid_ocr(candidates[0], candidates[0]["text"], minimum, roi):
+                raise ValueError("page_recheck_features_unverified")
+            found[text] = candidates[0]
+        if not found["日常任务"]["rect"][0] < found["周常任务"]["rect"][0] < found["主线任务"]["rect"][0]:
+            raise ValueError("page_recheck_layout_unverified")
+        recognized.append(found)
+    for text in labels:
+        a, b = (r[text]["rect"] for r in recognized)
+        if abs((a[0]+a[2]/2)-(b[0]+b[2]/2)) > 12 or abs((a[1]+a[3]/2)-(b[1]+b[3]/2)) > 12:
+            raise ValueError("page_recheck_unstable")
+    return {"status": "verified", "end_at": "task_page", "basis": "repeated_joint_labels",
+            "observations": recognized, "observed_at": report["ended_at"]}
 
 
 def scan_once(maa: str, profile: str, output: Path) -> tuple[dict, Path]:
@@ -249,6 +325,7 @@ def scan_once(maa: str, profile: str, output: Path) -> tuple[dict, Path]:
     run_dir = Path(tempfile.mkdtemp(prefix="reward-scan-", dir=output))
     report_file = run_dir / "evidence.json"
     nav_report = run_dir / "navigation.json"
+    recheck_report = run_dir / "page-recheck.json"
     name = "maa-reward-nav-" + uuid.uuid4().hex
     nav_task = config / "tasks" / (name + ".json")
     with nav_task.open("x", encoding="utf-8") as handle:
@@ -264,7 +341,19 @@ def scan_once(maa: str, profile: str, output: Path) -> tuple[dict, Path]:
         print("仅导航到任务页并扫描，不领取奖励。", flush=True)
         if execute(name, nav_report):
             raise ValueError("navigation_runner_failed")
-        nav = read_navigation(json.loads(nav_report.read_text(encoding="utf-8")))
+        navigation = json.loads(nav_report.read_text(encoding="utf-8"))
+        result = unknown("page_verification_failed")
+        nav = read_navigation(navigation)
+        if nav["status"] == "recheck_required":
+            recheck_name = name + "-page"
+            recheck_task = config / "tasks" / (recheck_name + ".json")
+            with recheck_task.open("x", encoding="utf-8") as handle:
+                json.dump({"tasks": [{"type": "Custom", "params": {"task_names": [PREFIX + PAGE_READS[0]]}}]}, handle)
+            (run_dir / "page-recheck-task.json").write_bytes(recheck_task.read_bytes())
+            result["page_recheck_report"] = str(recheck_report)
+            if execute(recheck_name, recheck_report):
+                raise ValueError("page_recheck_runner_failed")
+            nav = read_page_recheck(json.loads(recheck_report.read_text(encoding="utf-8")), navigation)
         result = unknown("scan_failed")
         if execute(TASK, report_file):
             result = unknown("scan_runner_failed")
@@ -274,6 +363,8 @@ def scan_once(maa: str, profile: str, output: Path) -> tuple[dict, Path]:
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         result["error"] = str(error)
     result["navigation_report"] = str(nav_report)
+    if recheck_report.exists():
+        result["page_recheck_report"] = str(recheck_report)
     result["scan_report"] = str(report_file)
     (run_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return result, run_dir

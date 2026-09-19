@@ -30,6 +30,88 @@ def pages_for(count):
 
 
 class RewardCheckTests(unittest.TestCase):
+    def page_report(self, directory, mutate=lambda p: None):
+        from test_drain_sanity import DrainTests, event
+        rows = [{"text": "t24/日常任务", "rect": [502, 10, 142, 43], "score": 0.845},
+                {"text": "周常任务", "rect": [753, 21, 87, 24], "score": 0.94},
+                {"text": "主线任务", "rect": [949, 19, 90, 26], "score": 0.99}]
+        pages = {p: copy.deepcopy(rows) for p in check.PAGE_READS}
+        mutate(pages)
+        body = event("TaskChainStart", taskchain="Custom")
+        for phase, items in pages.items():
+            ocr = ", ".join("{ text: %s, rect: [ %d, %d, %d, %d ], score: %.6f }" %
+                            (i["text"], *i["rect"], i["score"]) for i in items)
+            body += f"PipelineAnalyzer::analyze | OcrDetect MaaDailyCheck@{phase} [{ocr}]\n"
+            body += event("SubTaskCompleted", taskchain="Custom", first=[check.PREFIX+check.PAGE_READS[0]],
+                          details={"task": phase, "action": "DoNothing", "algorithm": "OcrDetect"})
+        body += event("TaskChainCompleted", taskchain="Custom")
+        report = DrainTests().report(directory, body)
+        report.update(started_at="2026-09-18T01:00:20+08:00", ended_at="2026-09-18T01:00:25+08:00")
+        return report
+
+    def test_page_recheck_joint_evidence_and_fail_closed(self):
+        nav = {"started_at": "2026-09-18T01:00:00+08:00", "ended_at": "2026-09-18T01:00:15+08:00"}
+        with tempfile.TemporaryDirectory() as directory:
+            report = self.page_report(directory)
+            self.assertEqual(check.read_page_recheck(report, nav)["basis"], "repeated_joint_labels")
+            for mutation in (
+                lambda p: p[check.PAGE_READS[0]][0].update(text="任务完成"),
+                lambda p: p[check.PAGE_READS[0]][0].update(score=0.79),
+                lambda p: p[check.PAGE_READS[1]].pop(),
+                lambda p: p[check.PAGE_READS[1]][0].update(rect=[502, 300, 142, 43]),
+                lambda p: p[check.PAGE_READS[1]][1].update(rect=[790, 21, 87, 24]),
+                lambda p: p[check.PAGE_READS[1]].append(copy.deepcopy(p[check.PAGE_READS[1]][0])),
+                lambda p: p.pop(check.PAGE_READS[1]),
+            ):
+                with self.assertRaises(ValueError):
+                    check.read_page_recheck(self.page_report(directory, mutation), nav)
+            report = self.page_report(directory)
+            report["ended_at"] = "2026-09-18T04:00:00+08:00"
+            with self.assertRaisesRegex(ValueError, "time_boundary"):
+                check.read_page_recheck(report, nav)
+            report = self.page_report(directory)
+            Path(report["evidence"]["log_file"]).write_text("changed")
+            with self.assertRaises(ValueError):
+                check.read_page_recheck(report, nav)
+
+    def test_low_navigation_requests_recheck_not_immediate_success(self):
+        from test_drain_sanity import DrainTests, event
+        body = (event("TaskChainStart", taskchain="Custom") +
+                event("SubTaskCompleted", taskchain="Custom", details={"task": "RewardNavReady", "action": "DoNothing",
+                      "result": {"text": "日常任务", "score": 0.845, "rect": [502, 10, 142, 43]}}) +
+                event("TaskChainCompleted", taskchain="Custom"))
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(check.read_navigation(DrainTests().report(directory, body))["status"], "recheck_required")
+
+    def test_scan_rechecks_once_and_never_scans_after_failed_recheck(self):
+        from subprocess import CompletedProcess
+        for passed in (True, False):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "tasks").mkdir()
+                calls = []
+                def execute(command, **kwargs):
+                    calls.append(command)
+                    if "--report-file" in command:
+                        Path(command[command.index("--report-file")+1]).write_text('{}')
+                    return CompletedProcess(command, 0)
+                with patch.object(check, "check_install", return_value=root), \
+                        patch.object(check.subprocess, "run", side_effect=execute), \
+                        patch.object(check, "read_navigation", return_value={"status": "recheck_required"}), \
+                        patch.object(check, "read_page_recheck", side_effect=None if passed else ValueError("page_recheck_features_unverified"),
+                                     return_value={"status": "verified"}), \
+                        patch.object(check, "evaluate", return_value={"status": "evaluated"}), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    result, output = check.scan_once("maa", "test", root / "out")
+                self.assertEqual(len(calls), 6 if passed else 4)
+                self.assertEqual(result["status"], "evaluated" if passed else "unknown")
+                self.assertEqual((output / "evidence.json").exists(), passed)
+                recheck = json.loads((output / "page-recheck-task.json").read_text())
+                self.assertEqual(recheck["tasks"][0]["params"]["task_names"], [check.PREFIX+check.PAGE_READS[0]])
+                assets = json.loads((ROOT / "maa-daily/assets/daily-checks/tasks.json").read_text())
+                self.assertEqual(assets[check.PREFIX+check.PAGE_READS[0]]["action"], "DoNothing")
+                self.assertEqual(assets[check.PREFIX+check.PAGE_READS[1]]["next"], [])
+
     def test_navigation_requires_task_page_and_no_business_clicks(self):
         from test_drain_sanity import DrainTests, event
         fixture = DrainTests()
@@ -45,6 +127,27 @@ class RewardCheckTests(unittest.TestCase):
                         body + event("SubTaskCompleted", taskchain="Custom", details={"task": "ReceiveAward", "action": "ClickSelf"})):
                 with self.assertRaises(ValueError):
                     check.read_navigation(fixture.report(directory, bad))
+
+    def test_high_confidence_path_has_no_extra_recheck_process(self):
+        from subprocess import CompletedProcess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "tasks").mkdir()
+            def execute(command, **kwargs):
+                if "--report-file" in command:
+                    Path(command[command.index("--report-file")+1]).write_text('{}')
+                return CompletedProcess(command, 0)
+            with patch.object(check, "check_install", return_value=root), \
+                    patch.object(check.subprocess, "run", side_effect=execute) as run, \
+                    patch.object(check, "read_navigation", return_value={"status":"verified"}), \
+                    patch.object(check, "read_page_recheck") as recheck, \
+                    patch.object(check, "evaluate", return_value={"status":"evaluated"}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                result, output = check.scan_once("maa", "test", root / "out")
+            self.assertEqual(run.call_count, 4)
+            recheck.assert_not_called()
+            self.assertNotIn("page_recheck_report", result)
+            self.assertFalse((output / "page-recheck-task.json").exists())
 
     def test_failed_navigation_never_scans_or_claims(self):
         from subprocess import CompletedProcess

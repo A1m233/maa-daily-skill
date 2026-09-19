@@ -7,6 +7,14 @@
     "algorithm": "OcrDetect", "text": ["日常任务"],
     "roi": [480, 0, 800, 65], "action": "DoNothing", "next": [], "maxTimes": 1
   },
+  "MaaDailyCheck@RewardPageRecheckA": {
+    "algorithm": "OcrDetect", "text": [], "roi": [480, 0, 800, 65],
+    "action": "DoNothing", "preDelay": 800, "postDelay": 800,
+    "next": ["MaaDailyCheck@RewardPageRecheckB"], "maxTimes": 1
+  },
+  "MaaDailyCheck@RewardPageRecheckB": {
+    "baseTask": "MaaDailyCheck@RewardPageRecheckA", "next": []
+  },
   "MaaDailyCheck@RewardNavHome": {
     "baseTask": "Award", "template": "SwitchTheme@ToggleSettingsMenu.png",
     "action": "DoNothing", "sub": ["MaaDailyCheck@RewardNavTask-Entry"],

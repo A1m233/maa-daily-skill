@@ -38,6 +38,62 @@ def probe_body(stage="AP-5", score=0.925990, mutate=lambda rows: None):
 
 
 class DrainTests(unittest.TestCase):
+    def failed_fight_body(self):
+        return (event("TaskChainStart") +
+                event("SubTaskError", subtask="RecognizeDrops", why="drop recognition error") +
+                event("SubTaskExtraInfo", what="SanityBeforeStage",
+                      details={"current_sanity": 25, "max_sanity": 205, "report_time": "2026-09-18 22:54:17"}) +
+                event("SubTaskExtraInfo", what="FightTimes", details={"times_finished": 5, "finished": True}) +
+                event("TaskChainCompleted"))
+
+    def test_failed_fight_retains_observation_without_authorizing_continuation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = self.report(directory, self.failed_fight_body())
+            def fight(params):
+                drain.check_fight(report, "LS-6", 5)
+            observe = unittest.mock.Mock(return_value=205)
+            result = drain.run_daily(observe, fight, None, unittest.mock.Mock(), lambda r: None,
+                                     policy={"mode": "off", "medicine_expire_days": 1},
+                                     cost=36, maximum=10, max_phases=5, max_runs=100)
+            self.assertEqual(result["status"], "stopped")
+            self.assertEqual(result["completed_runs"], 0)
+            self.assertIsNone(result["remaining_sanity"])
+            self.assertEqual(observe.call_count, 1)
+            obs = result["battle_observation"]
+            self.assertEqual(obs["observed_completed_runs"], 5)
+            self.assertEqual(obs["latest_sanity"]["current"], 25)
+            self.assertEqual(obs["drop_status"], "failed")
+            self.assertFalse(obs["usable_for_planning"])
+            self.assertEqual(result["phases"][-1]["battle_observation"], obs)
+
+    def test_observation_rejects_corrupt_ambiguous_or_unfinished_counts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for body in (self.failed_fight_body().replace('"finished": true', '"finished": false'),
+                         self.failed_fight_body() + event("TaskChainCompleted", taskid=2),
+                         self.failed_fight_body() + event("SubTaskExtraInfo", what="FightTimes",
+                                                         details={"times_finished":6,"finished":True}),
+                         self.failed_fight_body().replace('"current_sanity": 25', '"current_sanity": -1'),
+                         self.failed_fight_body().replace('"times_finished": 5', '"times_finished": -1')):
+                self.assertIsNone(drain.fight_observation(self.report(directory, body))["observed_completed_runs"])
+            report = self.report(directory, self.failed_fight_body())
+            Path(report["evidence"]["log_file"]).write_text('changed')
+            self.assertEqual(drain.fight_observation(report)["status"], "unknown")
+            self.assertIsNone(drain.fight_observation(report)["latest_sanity"])
+
+    def test_medicine_failure_preserves_observations_but_never_tails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = self.report(directory, self.failed_fight_body())
+            fight, check = unittest.mock.Mock(), unittest.mock.Mock()
+            def recover(params):
+                raise drain.FightUnverified("invalid_or_failed_callback", report)
+            result = drain.run_daily(lambda: 205, fight, recover, check, lambda r: None,
+                                     policy={"mode": "use_and_drain", "medicine_expire_days": 1},
+                                     cost=36, maximum=10, max_phases=5, max_runs=100)
+            self.assertEqual(result["battle_observation"]["observed_completed_runs"], 5)
+            self.assertEqual(result["status"], "stopped")
+            fight.assert_not_called()
+            check.assert_not_called()
+
     def run_loop(self, readings, cost=30, maximum=10, failure=False, **bounds):
         sequence = iter(readings)
         fights, saved = [], []

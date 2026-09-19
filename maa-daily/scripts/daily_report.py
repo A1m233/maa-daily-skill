@@ -50,6 +50,18 @@ def summarize(result):
     drain = steps.get("drain", {})
     if drain.get("status") in DONE and type(drain.get("remaining_sanity")) is int:
         facts.append(f"{drain.get('stage', '目标关卡')} 完成 {drain.get('completed_runs', '未知')} 场，剩余理智 {drain['remaining_sanity']}")
+    elif drain.get("status") not in DONE:
+        observation = drain.get("battle_observation", {})
+        if observation.get("status") == "observed":
+            count = observation.get("observed_completed_runs")
+            if type(count) is int:
+                facts.append(f"未通过完整核验的战斗阶段，日志上报完成 {count} 场（仍需核验）")
+            sanity = observation.get("latest_sanity") or {}
+            if type(sanity.get("current")) is int:
+                facts.append(f"该阶段最近日志理智为 {sanity['current']}（{sanity.get('observed_at', '时间未知')}，非当前可复用读数）")
+            note("drain_evidence", "战斗完整核验未通过，保留已观察结果；补跑前须重新核验当前状态，不按已核验场次为零直接重打。")
+            if observation.get("drop_status") == "failed":
+                note("drain_drops", "掉落识别失败，不能确认本阶段掉落结果。")
     medicine = drain.get("medicine_check", {})
     if medicine.get("status") == "detected":
         note("medicine", "仍检测到临期药，请在到期前处理；本轮不自动扩大用药范围。")

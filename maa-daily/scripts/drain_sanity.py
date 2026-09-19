@@ -31,9 +31,10 @@ def write_json(path: Path, value: dict) -> None:
     temporary.replace(path)
 
 
-def callbacks(report: dict) -> list[tuple[str, dict]]:
+def recorded_callbacks(report: dict) -> list[tuple[str, dict]]:
+    """只读取完整且哈希匹配的区间；不把失败报告当成执行许可。"""
     evidence = report["evidence"]
-    if report.get("wrapper_exit_code") != 0 or report.get("child_exit_code") != 0 or evidence.get("state") != "bounded":
+    if evidence.get("state") != "bounded":
         raise ValueError("process_failed_or_unbounded")
     start, end = evidence["before_size"], evidence["after_size"]
     if type(start) is not int or type(end) is not int or not 0 <= start < end or end-start > 64*1024*1024:
@@ -48,10 +49,87 @@ def callbacks(report: dict) -> list[tuple[str, dict]]:
         if MARKER in line:
             kind, _, payload = line.split(MARKER, 1)[1].partition(" ")
             value = json.loads(payload)
-            if not isinstance(value, dict) or kind in {"TaskChainError", "SubTaskError"}:
+            if not isinstance(value, dict):
                 raise ValueError("invalid_or_failed_callback")
             events.append((kind, value))
     return events
+
+
+def callbacks(report: dict) -> list[tuple[str, dict]]:
+    if report.get("wrapper_exit_code") != 0 or report.get("child_exit_code") != 0:
+        raise ValueError("process_failed_or_unbounded")
+    events = recorded_callbacks(report)
+    if any(k in {"TaskChainError", "SubTaskError"} for k, _ in events):
+        raise ValueError("invalid_or_failed_callback")
+    return events
+
+
+def fight_observation(report: dict) -> dict:
+    """失败时仍保留日志事实；不改变严格核验、预算或恢复决策。"""
+    result = {"status": "unknown", "observed_completed_runs": None,
+              "latest_sanity": None, "drop_status": "unknown",
+              "usable_for_planning": False, "observed_at": report.get("ended_at")}
+    try:
+        events = recorded_callbacks(report)
+        chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
+        if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Fight")
+                or chains[1][0] not in {"TaskChainCompleted", "TaskChainError", "TaskChainStopped"}
+                or chains[1][1:] != chains[0][1:]):
+            raise ValueError("ambiguous_fight_chain")
+        counts, drops, drop_errors = [], [], []
+        active = False
+        for kind, value in events:
+            if kind == "TaskChainStart":
+                active = True
+            elif kind.startswith("TaskChain"):
+                active = False
+            if not kind.startswith("SubTask"):
+                continue
+            if not active or (value.get("taskchain"), value.get("taskid")) != chains[0][1:]:
+                raise ValueError("unexpected_fight_event_origin")
+            detail = value.get("details", {})
+            if not isinstance(detail, dict):
+                raise ValueError("invalid_observed_details")
+            if kind == "SubTaskExtraInfo" and value.get("what") == "FightTimes":
+                count = detail.get("times_finished")
+                if type(count) is not int or count < 0 or (counts and count < counts[-1]):
+                    raise ValueError("invalid_observed_count")
+                counts.append(count)
+                if detail.get("finished") is True:
+                    result["observed_completed_runs"] = count
+            if kind == "SubTaskExtraInfo" and value.get("what") == "SanityBeforeStage":
+                current, maximum = detail.get("current_sanity"), detail.get("max_sanity")
+                if type(current) is not int or current < 0 or type(maximum) is not int or maximum <= 0:
+                    raise ValueError("invalid_observed_sanity")
+                result["latest_sanity"] = {"current": current, "maximum": maximum,
+                                           "observed_at": detail.get("report_time", report.get("ended_at"))}
+            if kind == "SubTaskExtraInfo" and value.get("what") == "StageDrops":
+                stage = detail.get("stage", {})
+                if not isinstance(stage, dict):
+                    raise ValueError("invalid_observed_stage")
+                drops.append(stage.get("stageCode"))
+            if kind == "SubTaskError" and (value.get("subtask") in {"RecognizeDrops", "StageDropsTask"}
+                                            or value.get("why") == "drop recognition error"):
+                drop_errors.append(value.get("subtask"))
+        result.update(status="observed", drop_status="failed" if drop_errors else "reported" if drops else "unknown",
+                      reported_drop_stages=drops, drop_errors=drop_errors, chain_terminal=chains[-1][0],
+                      source={k: report["evidence"].get(k) for k in
+                              ("log_file", "before_size", "after_size", "interval_sha256")})
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        result.update(status="unknown", observed_completed_runs=None, latest_sanity=None, reason=str(error))
+    return result
+
+
+class FightUnverified(ValueError):
+    def __init__(self, reason, report):
+        super().__init__(reason)
+        self.observation = fight_observation(report)
+
+
+def preserve_failed_fight(result, error):
+    if isinstance(error, FightUnverified) and result["phases"]:
+        result["phases"][-1]["battle_observation"] = error.observation
+        result["battle_observation"] = error.observation
 
 
 def navigation_tasks(stage: str, start_at: str = "auto") -> list[dict]:
@@ -150,6 +228,13 @@ def read_probe(report: dict, stage: str) -> int:
 
 
 def check_fight(report: dict, stage: str, expected: int) -> None:
+    try:
+        _check_fight(report, stage, expected)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise FightUnverified(str(error), report) from error
+
+
+def _check_fight(report: dict, stage: str, expected: int) -> None:
     events = callbacks(report)
     chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
     if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Fight")
@@ -181,7 +266,7 @@ def drain(observe, fight, save, *, cost: int, maximum: int, max_phases: int, max
     plan(0, cost, maximum)
     if max_phases < 1 or max_runs < 1:
         raise ValueError("positive_bounds_required")
-    result = {"status": "running", "completed_runs": 0, "phases": [],
+    result = {"status": "running", "completed_runs": 0, "completed_runs_basis": "fully_verified_only", "phases": [],
               "remaining_sanity": None, "last_known_sanity": None}
     save(result)
     try:
@@ -218,6 +303,7 @@ def drain(observe, fight, save, *, cost: int, maximum: int, max_phases: int, max
             raise ValueError("phase_budget_exceeded")
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         result.update(status="stopped", reason=str(error))
+        preserve_failed_fight(result, error)
         if result["phases"] and result["phases"][-1]["status"] == "running":
             result["phases"][-1].update(status="unverified", reason=str(error))
     save(result)
@@ -230,7 +316,8 @@ def run_daily(observe, fight, recover, check, save, *, policy, cost, maximum, ma
     plan(0, cost, maximum)
     if type(max_runs) is not int or type(max_phases) is not int or min(max_runs, max_phases) < 1:
         raise ValueError("positive_bounds_required")
-    result = {"status": "running", "policy": policy, "completed_runs": 0, "medicine_used": 0,
+    result = {"status": "running", "policy": policy, "completed_runs": 0,
+              "completed_runs_basis": "fully_verified_only", "medicine_used": 0,
               "medicine_goal": "unknown" if policy["mode"] == "use_and_drain" else "not_requested",
               "remaining_sanity": None, "last_known_sanity": None, "phases": [],
               "medicine_check": {"status": "unknown", "reason": "not_checked", "reminder_required": True},
@@ -283,6 +370,8 @@ def run_daily(observe, fight, recover, check, save, *, policy, cost, maximum, ma
                               remaining_sanity=tail["remaining_sanity"],
                               last_known_sanity=tail["last_known_sanity"],
                               phases=base_phases + tail["phases"])
+                if "battle_observation" in tail:
+                    result["battle_observation"] = tail["battle_observation"]
                 save(result)
             # 首次使用刚取得的初始/恢复后读数，之后每场阶段再独立读取。
             # 两次调用之间没有游戏动作，不重复启动同一准备页检查。
@@ -304,6 +393,7 @@ def run_daily(observe, fight, recover, check, save, *, policy, cost, maximum, ma
             result["status"] = "completed_with_reminder"
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         result.update(status="stopped", reason=str(error))
+        preserve_failed_fight(result, error)
         if result["phases"] and result["phases"][-1]["status"] == "running":
             result["phases"][-1].update(status="unverified", reason=str(error))
     save(result)
@@ -370,6 +460,8 @@ class Runtime:
         record["subtask_error_lines"] = report.get("evidence", {}).get("subtask_error_lines", [])
         write_json(self.output / "processes.json", {"processes": self.reports})
         if code:
+            if phase in {"fight", "medicine-bulk"}:
+                raise FightUnverified("runner_failed: " + str(code), report)
             raise ValueError("runner_failed: " + str(code))
         return report
 
@@ -425,7 +517,10 @@ def main(argv=None) -> int:
             def recover(parameters):
                 task = recovery_task(args.stage, policy, parameters["series"], parameters["times"])
                 report = runtime.run([task], "medicine-bulk")
-                return inspect_recovery(report, args.stage, policy["medicine_expire_days"], parameters["times"])
+                try:
+                    return inspect_recovery(report, args.stage, policy["medicine_expire_days"], parameters["times"])
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    raise FightUnverified(str(error), report) from error
             result = run_daily(observe, fight, recover,
                                lambda: scan(runtime, args.stage, policy["medicine_expire_days"], cost=cost),
                                lambda r: write_json(runtime.output / "result.json", r), policy=policy,

@@ -106,6 +106,20 @@ class ReportTests(unittest.TestCase):
         summarize(r)
         self.assertEqual(r,before)
 
+    def test_failed_fight_observation_is_not_reported_as_verified_or_zero(self):
+        r = self.result()
+        r['steps']['drain'].update(status='failed', completed_runs=0, remaining_sanity=None,
+            battle_observation={'status':'observed', 'observed_completed_runs':5,
+                'drop_status':'failed', 'usable_for_planning':False,
+                'latest_sanity':{'current':25, 'maximum':205, 'observed_at':'2026-09-18 22:54:17'}})
+        out = summarize(r)
+        self.assertEqual(out['status'], 'incomplete')
+        self.assertTrue(any('日志上报完成 5 场' in text for text in out['facts']))
+        self.assertFalse(any('完成 0 场' in text for text in out['facts']))
+        self.assertTrue({'drain_evidence','drain_drops'} <= {n['code'] for n in out['notices']})
+        del r['steps']['drain']['battle_observation']
+        self.assertEqual(summarize(r)['facts'], [])
+
     def test_untranslated_component_notice_is_not_lost(self):
         r=self.result()
         r['steps']['pre']['reminder_required']=True

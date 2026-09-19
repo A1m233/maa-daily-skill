@@ -66,6 +66,8 @@ python <skill-root>/scripts/drain_sanity.py run --stage PR-D-2 --policy <本地�
 
 每个真实进程经薄 runner 保存区间哈希与内部告警。`processes.json` 记录临时 task、配置目录及导航隔离标志，原文件保留用于审计；不自动删除或中断后续跑。`result.json` 区分已核验场次、未知阶段、最新理智和药物提醒；开战后尚未重读时旧值只保留在 last_known_sanity，不用于补跑。
 
+`completed_runs_basis=fully_verified_only` 表明 `completed_runs` 仅累计完整核验通过的阶段。战斗阶段失败时，组件仍从原报告哈希绑定的唯一 Fight 链提取 `battle_observation`：`observed_completed_runs` 是 `finished=true` 的日志计数，`latest_sanity` 带原观察时间，掉落识别失败单独保留。它不改变失败状态、不累计进已核验场次，也不恢复自动续跑；`usable_for_planning=false`，不能把历史读数直接作为当前预算。报告里的已核验零场不等于游戏未打，尤其不能据此原样重跑。顶层观测仅对应最后失败阶段，不是跨进程累计总数；链归属不明、日志变化或计数冲突时观测也返回 unknown。原生用药阶段和无药补尾均适用。
+
 退出 0 表示 probe 有效，或清理完成（可能带 completed_with_reminder），不是完整日常或临期库存清空。失败保留证据，不能自动回退旧 task。扫描失败可能遗留窗口，因此仅在有终态证据时报告 prepared。
 
 ## 验证状态
@@ -77,3 +79,5 @@ python <skill-root>/scripts/drain_sanity.py run --stage PR-D-2 --policy <本地�
 同日只导航实测首次因沿用“存在任何 ERR 就停止”而误拦截：原生选关已完成且 FightBegin 的 Stop 生效，仅初始化记录两条 FightSeries-OldMethodFlag 内部错误。修订后不维护错误白名单，以执行边界、选关/Stop 和无战斗资源事件联合核验；原始报告回放通过，告警完整保留。
 
 随后 AP-5、AP-5 准备页到 PR-D-2、PR-D-2 准备页到 1-7 三项 probe 均通过原生导航、Stop 以及独立关卡/理智双读，读数分别为 7、8、10。导航报告各保留两条内部告警，独立 OCR 无错误；没有开战、用药或切号。验证覆盖标准资源、芯片与一个主线准备页，未覆盖更多布局、任意起点或新隔离配置中的真实战斗。账号和原始日志只留本地。
+
+2026-09-19 失败战斗观测回放：原日志区间与先前记录的哈希一致，提取出 finished=true 的 5 场、最近理智 25 和掉落识别错误；严格核验仍失败。原报告文件不可读，回放使用由已知行区间重建的内存元数据，未伪造或改写 runner 报告。离线测试另覆盖无药/用药失败均停止、未知或损坏证据不补造计数，以及简报保留观察事实；未为验证此改动追加真实战斗。

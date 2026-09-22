@@ -309,6 +309,8 @@ def main(argv=None):
     parser.add_argument("--profile", required=True)
     parser.add_argument("--account", required=True, help="本地报告别名，不执行切号；调用者先核验身份与设备")
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--output-format", choices=["brief", "json"], default="brief",
+                        help="run 的结束输出：默认用户简报；json 保留旧版详细结果输出，退出码不变")
     args = parser.parse_args(argv)
     lock = None
     try:
@@ -327,10 +329,19 @@ def main(argv=None):
             brief = summarize(result)
             write_json(ops.output / "brief.json", brief)
             (ops.output / "brief.md").write_text(brief["text"] + "\n", encoding="utf-8")
-        print(json.dumps(result, ensure_ascii=False))
+        if args.mode == "run" and args.output_format == "brief":
+            print("\n用户简报：\n" + brief["text"], flush=True)
+            print("\n详细结果：" + str(ops.output / "daily-result.json"))
+        else:
+            print(json.dumps(result, ensure_ascii=False))
         return 0 if result["status"] in {"prepared", "completed", "completed_with_reminder"} else 2
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
-        print(json.dumps({"status": "incomplete", "reason": str(error)}, ensure_ascii=False))
+        failure = json.dumps({"status": "incomplete", "reason": str(error)}, ensure_ascii=False)
+        if args.mode == "run" and args.output_format == "brief":
+            print(f"\n用户简报：\n{args.account}：日常未完整完成，未能生成完整简报；请根据错误与已有证据核对停止位置，不要直接重跑。")
+            print(failure, file=sys.stderr)
+        else:
+            print(failure)
         return 2
     finally:
         if lock is not None:

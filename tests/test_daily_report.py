@@ -6,10 +6,12 @@ import sys
 import tempfile
 import unittest
 import subprocess
+import contextlib
+import io
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'maa-daily/scripts'))
 from recruit_check import inspect_report, MARKER
-from daily_report import summarize
+from daily_report import summarize, summarize_many, main
 
 
 def event(kind, **extra):
@@ -125,6 +127,90 @@ class ReportTests(unittest.TestCase):
         r['steps']['pre']['reminder_required']=True
         out=summarize(r)
         self.assertIn('review_pre', {n['code'] for n in out['notices']})
+
+    def complete_result(self, account):
+        r = self.result()
+        r['account'] = account
+        r['steps']['drain'].update(stage='AP-5', completed_runs=6, remaining_sanity=25)
+        r['steps']['checks']['rewards'] = {'status':'evaluated', 'daily_orundum':'claimed',
+                                         'daily_annihilation_ticket':'claimed'}
+        return r
+
+    def test_multi_groups_shared_facts_and_preserves_scoped_notices(self):
+        a, b = self.complete_result('A'), self.complete_result('B')
+        for r in (a, b):
+            r['steps']['drain']['medicine_check'] = {'status':'unknown'}
+        b['steps']['pre']['tasks'] = [{'type':'Recruit', 'recruitment': self.inspect(self.rounds())}]
+        before = copy.deepcopy([a, b])
+        out = summarize_many([b, a], ['A', 'B'], a['game_day'])
+        self.assertEqual(out['status'], 'completed_with_reminder')
+        medicine = next(n for n in out['notices'] if n['code'] == 'medicine')
+        self.assertEqual(medicine['accounts'], ['A', 'B'])
+        preserved = next(n for n in out['notices'] if n['code'] == 'recruit_0_0')
+        self.assertEqual(preserved['accounts'], ['B'])
+        shared = [f for f in out['facts'] if f['accounts'] == ['A', 'B']]
+        self.assertEqual(len(shared), 2)
+        self.assertLess(out['text'].index(medicine['text']), out['text'].index(shared[0]['text']))
+        self.assertEqual([a, b], before)
+
+    def test_multi_complete_missing_and_partial(self):
+        a, b = self.complete_result('A'), self.complete_result('B')
+        self.assertEqual(summarize_many([a, b], ['A', 'B'], a['game_day'])['status'], 'completed')
+        out = summarize_many([a], ['A', 'B'], a['game_day'])
+        self.assertEqual(out['status'], 'incomplete')
+        self.assertEqual(out['missing_accounts'], ['B'])
+        self.assertEqual(out['notices'][0]['accounts'], ['B'])
+        b['steps']['drain']['status'] = 'pending'
+        b['steps']['checks']['rewards']['daily_annihilation_ticket'] = 'unknown'
+        out = summarize_many([a, b], ['A', 'B'], a['game_day'])
+        self.assertEqual(out['status'], 'incomplete')
+        self.assertTrue({'step_drain', 'daily_annihilation_ticket'} <= {n['code'] for n in out['notices']})
+        self.assertTrue(all(n['accounts'] == ['B'] for n in out['notices']))
+        empty = summarize_many([], ['A', 'B'], a['game_day'])
+        self.assertEqual(empty['missing_accounts'], ['A', 'B'])
+        self.assertEqual(empty['facts'], [])
+
+    def test_multi_rejects_ambiguous_sources(self):
+        a = self.complete_result('A')
+        for results, accounts, day in (([a, a], ['A'], a['game_day']),
+                                       ([a], ['B'], a['game_day']),
+                                       ([a], ['A', 'A'], a['game_day']),
+                                       ([a], ['A'], '2026-09-15')):
+            with self.assertRaises(ValueError):
+                summarize_many(results, accounts, day)
+
+    def test_cli_multi_missing_preserves_source_and_refuses_output_overwrite(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            source = root / 'result.json'
+            source.write_text(json.dumps(self.complete_result('A')), encoding='utf-8')
+            before = source.read_bytes()
+            args = ['--daily-result', str(source), '--expect-account', 'A', '--expect-account', 'B',
+                    '--game-day', '2026-09-14', '--output-dir', str(root/'brief'), '--json']
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                self.assertEqual(main(args), 2)
+            value = json.loads(stdout.getvalue())
+            self.assertEqual(value['missing_accounts'], ['B'])
+            written = (root/'brief/brief.json').read_bytes()
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                self.assertEqual(main(args), 2)
+            self.assertEqual(json.loads(stdout.getvalue())['status'], 'unknown')
+            self.assertEqual(written, (root/'brief/brief.json').read_bytes())
+            self.assertEqual(source.read_bytes(), before)
+            # Existing single-account CLI is unchanged and does not need an account list.
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                self.assertEqual(main(['--daily-result', str(source), '--json']), 0)
+            self.assertEqual(json.loads(stdout.getvalue())['status'], 'completed')
+
+    def test_cli_bad_input_never_reports_completion(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'bad.json'
+            path.write_text('null', encoding='utf-8')
+            for args in ([], ['--daily-result', str(path)], ['--expect-account', 'A'],
+                         ['--expect-account', 'A', '--game-day', 'bad-date']):
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    self.assertEqual(main([*args, '--json']), 2)
+                self.assertEqual(json.loads(stdout.getvalue())['status'], 'unknown')
 
 
 if __name__=='__main__':

@@ -1,4 +1,6 @@
 import copy
+import contextlib
+import io
 import datetime as dt
 import hashlib
 import json
@@ -13,6 +15,50 @@ import daily_run as daily
 
 
 class DailyTests(unittest.TestCase):
+    def test_cli_end_output_uses_brief_and_keeps_json_opt_in(self):
+        for status in ('completed', 'incomplete'):
+            for output_format in ('brief', 'json'):
+                with self.subTest(status=status, output_format=output_format), tempfile.TemporaryDirectory() as root:
+                    root = Path(root)
+                    ops = Mock(output=root, day='2026-09-14', stage='AP-5')
+                    result = {'status':status, 'account':'example', 'game_day':ops.day,
+                              'steps':{s:{'status':'completed'} for s in daily.STEPS}}
+                    result['steps']['checks']['rewards'] = {'status':'evaluated',
+                        'daily_orundum':'claimed', 'daily_annihilation_ticket':'claimed'}
+                    if status == 'incomplete':
+                        result['steps']['drain']['status'] = 'pending'
+                    def flow(ops, save):
+                        save(result)
+                        return result
+                    args = ['run', '--config', str(root/'unused'), '--profile', 'test',
+                            '--account', 'example', '--output-dir', str(root)]
+                    if output_format == 'json':
+                        args.extend(['--output-format', 'json'])
+                    with patch.object(daily, 'load_config', return_value={}), \
+                         patch.object(daily, 'check_install', return_value=root), \
+                         patch.object(daily, 'Daily', return_value=ops), \
+                         patch.object(daily, 'execute_flow', side_effect=flow), \
+                         contextlib.redirect_stdout(io.StringIO()) as stdout:
+                        self.assertEqual(daily.main(args), 0 if status == 'completed' else 2)
+                    if output_format == 'brief':
+                        brief = json.loads((root/'brief.json').read_text(encoding='utf-8'))
+                        self.assertIn(brief['text'], stdout.getvalue())
+                        self.assertNotIn('"steps":', stdout.getvalue())
+                    else:
+                        self.assertEqual(json.loads(stdout.getvalue().splitlines()[-1]), result)
+                    self.assertEqual(json.loads((root/'daily-result.json').read_text(encoding='utf-8')), result)
+                    self.assertFalse((root/'maa-daily-run.lock').exists())
+
+    def test_cli_early_error_is_visible_without_claiming_a_completed_run(self):
+        with patch.object(daily, 'load_config', side_effect=ValueError('bad_config')), \
+             contextlib.redirect_stdout(io.StringIO()) as stdout, \
+             contextlib.redirect_stderr(io.StringIO()) as stderr:
+            code = daily.main(['run', '--config', 'unused', '--profile', 'test',
+                               '--account', 'example', '--output-dir', 'unused'])
+        self.assertEqual(code, 2)
+        self.assertIn('example', stdout.getvalue())
+        self.assertEqual(json.loads(stderr.getvalue()), {'status':'incomplete', 'reason':'bad_config'})
+
     def test_fixed_order_even_when_priority_completes(self):
         for status in ("completed", "not_scheduled"):
             ops = Mock(day="2026-09-14", account="example")

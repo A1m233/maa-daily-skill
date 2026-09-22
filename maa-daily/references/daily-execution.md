@@ -49,7 +49,7 @@ python <skill-root>/scripts/daily_run.py run --config <本机配置.toml> --maa 
 
 `daily-result.json` 固定列出 pre / priority / drain / award / checks。没有执行的阶段保持 pending；失败阶段保留原因，不允许省略缺项后汇报完成。
 
-执行结束另产 `brief.json` / `brief.md`，按[用户简报](daily-summary.md)合并各组件提醒；公招保留标签通过日志提取，不只记录错误数量。前段中途失败仍保留已完成前段的公招明细。简报不改变阶段继续/停止条件。
+`run` 执行结束默认直接输出用户简报，并另产 `brief.json` / `brief.md`；最终回复和多账号合并按[用户简报](daily-summary.md)使用这些结果。`--output-format json` 保留旧版结束详细 JSON 输出；`preflight` 仍输出预检 JSON，不生成已执行日常的简报。初始化或简报生成失败时明确报告未完整完成，诊断原因保留在 stderr，不伪造业务结果。公招保留标签通过日志提取，前段中途失败仍保留已完成前段的公招明细。输出格式不改变阶段继续/停止条件或退出码。
 
 - completed：固定阶段完成且没有组件提醒；不是商店/基建全部游戏状态的额外断言。
 - completed_with_reminder：阶段执行完成，但有基建未知、药物库存未知或奖励区间不足等提醒。

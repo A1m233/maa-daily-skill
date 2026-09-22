@@ -110,38 +110,104 @@ def summarize(result):
         text += "\n\n" + "\n".join("- " + n["text"] for n in notices)
     if facts:
         text += "\n\n" + "；".join(facts) + "。"
-    return {"status": status, "reminder_required": bool(notices), "notices": notices,
+    return {"status": status, "account": result.get("account", "当前账号"),
+            "game_day": result.get("game_day"), "reminder_required": bool(notices), "notices": notices,
             "facts": facts, "text": text, "source_identity": "caller_must_verify_account_and_game_day"}
 
 
-def main():
+def summarize_many(results, expected_accounts, expected_day):
+    """只合并同一请求的结果；缺报告显式保留，不合并同账号的历史/补跑报告。"""
+    if (not expected_accounts or any(not isinstance(a, str) or not a.strip() for a in expected_accounts)
+            or len(set(expected_accounts)) != len(expected_accounts)):
+        raise ValueError("expected_accounts_required_and_unique")
+    if dt.date.fromisoformat(expected_day).isoformat() != expected_day:
+        raise ValueError("invalid_game_day")
+    by_account = {}
+    for result in results:
+        account = result["account"]
+        if account not in expected_accounts or account in by_account:
+            raise ValueError("unexpected_or_duplicate_account")
+        if result.get("game_day") != expected_day:
+            raise ValueError("different_game_day")
+        by_account[account] = summarize(result)
+    missing = [a for a in expected_accounts if a not in by_account]
+    notices, facts = [], []
+
+    def group(target, item, account):
+        for existing in target:
+            if {k: v for k, v in existing.items() if k != "accounts"} == item:
+                if account not in existing["accounts"]:
+                    existing["accounts"].append(account)
+                return
+        target.append({**item, "accounts": [account]})
+
+    for account in expected_accounts:
+        if account in missing:
+            group(notices, {"code": "missing_report", "text": "缺少本轮结果，完成情况未确认；请核对是否尚未执行，不据此自动重跑。"}, account)
+            continue
+        for note in by_account[account]["notices"]:
+            group(notices, note, account)
+        for fact in by_account[account]["facts"]:
+            group(facts, {"text": fact}, account)
+    incomplete = bool(missing) or any(r["status"] == "incomplete" for r in by_account.values())
+    status = "incomplete" if incomplete else "completed_with_reminder" if notices else "completed"
+    headline = {"incomplete": "日常未全部完成", "completed_with_reminder": "日常流程已结束，有事项需要关注",
+                "completed": "日常流程已完成"}[status]
+    text = f"{'、'.join(expected_accounts)}：{headline}（游戏日 {expected_day}）。"
+    if notices:
+        text += "\n\n" + "\n".join(f"- {'、'.join(n['accounts'])}：{n['text']}" for n in notices)
+    if facts:
+        text += "\n\n" + "\n".join(f"{'、'.join(f['accounts'])}：{f['text']}。" for f in facts)
+    return {"status": status, "game_day": expected_day, "accounts": expected_accounts,
+            "missing_accounts": missing, "reminder_required": bool(notices),
+            "notices": notices, "facts": facts, "text": text,
+            "source_identity": "caller_must_verify_account_and_game_day"}
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--daily-result", type=Path, required=True)
+    parser.add_argument("--daily-result", type=Path, action="append", default=[])
+    parser.add_argument("--expect-account", action="append", default=[], help="本次应跑账号，按顺序重复传入；缺报告仍列入汇总")
+    parser.add_argument("--game-day", help="多账号汇总要求的服务器游戏日 YYYY-MM-DD，不自动采用今天")
     parser.add_argument("--recruit-report", type=Path, action="append", default=[],
                         help="只读回放旧结果缺少的公招报告；调用者先核验同账号同游戏日，不用于自动恢复")
     parser.add_argument("--output-dir", type=Path, help="新建本地简报目录，已存在则拒绝，不改原报告")
     parser.add_argument("--json", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
-        source = json.loads(args.daily_result.read_text(encoding="utf-8"))
-        tasks = source.get("steps", {}).get("pre", {}).get("tasks", [])
-        if args.recruit_report and any(t.get("type") == "Recruit" for t in tasks):
-            raise ValueError("recruit_results_already_present")
-        for path in args.recruit_report:
-            report = json.loads(path.read_text(encoding="utf-8"))
-            if game_day(dt.datetime.fromisoformat(report["ended_at"])) != source.get("game_day"):
-                raise ValueError("different_game_day")
-            source.setdefault("steps", {}).setdefault("pre", {}).setdefault("tasks", []).append(
-                {"type": "Recruit", "recruitment": inspect_report(report)})
-        result = summarize(source)
+        if args.expect_account:
+            if not args.game_day or args.recruit_report:
+                raise ValueError("multi_summary_requires_game_day_and_no_recruit_patch")
+            sources = [json.loads(p.read_text(encoding="utf-8")) for p in args.daily_result]
+            result = summarize_many(sources, args.expect_account, args.game_day)
+        else:
+            if len(args.daily_result) != 1 or args.game_day:
+                raise ValueError("single_result_or_explicit_expected_accounts_required")
+            result = summarize_with_recruit(args.daily_result[0], args.recruit_report)
         if args.output_dir:
             args.output_dir.mkdir(parents=True, exist_ok=False)
             (args.output_dir / "brief.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             (args.output_dir / "brief.md").write_text(result["text"] + "\n", encoding="utf-8")
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        result = {"status": "unknown", "reminder_required": True, "text": "结果文件无法解析，日常完成情况未知。"}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        result = {"status": "unknown", "reminder_required": True, "reason": str(error),
+                  "text": "报告读取或汇总校验未通过，日常完成情况未知；请核对输入，不据此重跑游戏。"}
     print(json.dumps(result, ensure_ascii=False) if args.json else result["text"])
     return 2 if result["status"] in {"unknown", "incomplete"} else 0
+
+
+def summarize_with_recruit(path, recruit_reports):
+    # 旧报告只读补入仍限单账号；不能猜测外部公招报告属于哪个账号。
+    source = json.loads(path.read_text(encoding="utf-8"))
+    tasks = source.get("steps", {}).get("pre", {}).get("tasks", [])
+    if recruit_reports and any(t.get("type") == "Recruit" for t in tasks):
+        raise ValueError("recruit_results_already_present")
+    for path in recruit_reports:
+        report = json.loads(path.read_text(encoding="utf-8"))
+        if game_day(dt.datetime.fromisoformat(report["ended_at"])) != source.get("game_day"):
+            raise ValueError("different_game_day")
+        source.setdefault("steps", {}).setdefault("pre", {}).setdefault("tasks", []).append(
+            {"type": "Recruit", "recruitment": inspect_report(report)})
+    return summarize(source)
 
 
 if __name__ == "__main__":

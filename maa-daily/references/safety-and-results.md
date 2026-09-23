@@ -85,7 +85,21 @@ runner 使用待执行命令的同一个 `maa` 可执行文件调用 `maa dir lo
 
 runner 不保存完整命令参数或完整日志副本，`business_result` 固定为 `not_evaluated`。这意味着 runner 的零退出码仍不证明账号、购买、领取、招募、基建或资源消耗等后置条件成立；Agent 必须按报告给出的本轮日志范围继续核对相关业务证据。
 
-报告 schema 2 采用 `execution-boundary-v1`：子进程非零时保留其退出码；子进程为零但日志不可界定、回调无法解析、任务链身份/生命周期有歧义、没有任务链或缺少终态时返回 `74`；出现 `TaskChainError`、`TaskChainStopped`、`InternalError` 或 `InitFailed` 时返回 `75`。仅有 `SubTaskError` 或内部 ERR/CRT 不会自动改写完整的任务链执行结果，但全部保留用于业务核验。零退出码只代表执行边界完整，绝不代表业务通过。任一非零结果都停止后续真实进程；宿主显示笼统失败时读取 `wrapper_exit_code`。报告只写本地临时或调试目录，不写入 Skill 仓库。
+报告 schema 2 采用 `execution-boundary-v2`：子进程非零时保留其退出码；子进程为零但日志不可界定、回调无法解析、任务链身份/生命周期有歧义、没有任务链或缺少终态时返回 `74`；出现 `TaskChainError`、`TaskChainStopped`、`InternalError` 或 `InitFailed` 时返回 `75`。仅有 `SubTaskError` 或内部 ERR/CRT 不会自动改写完整的任务链执行结果，但全部保留用于业务核验。零退出码只代表执行边界完整，绝不代表业务通过。任一非零结果都停止后续真实进程；宿主显示笼统失败时读取 `wrapper_exit_code`。报告只写本地临时或调试目录，不写入 Skill 仓库。
+
+子任务回调的 `taskid` 不一定等于主链 ID。[MaaCore v6.17.1 StartUpTask](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Task/Interface/StartUpTask.cpp) 独立创建并运行内部任务；[AbstractTask](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Task/AbstractTask.h) 的默认 ID 为 0，常规 [PackageTask](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Task/PackageTask.cpp) 才向其子任务集合传播 ID。v2 保持主链开始/终态的 ID 精确匹配；对未匹配的 `SubTaskError(taskid=0)`，仅在进程、线程、设备 UUID 和链名一致且存在唯一活动正 ID 主链时归属。缺上下文、候选不唯一、不同非零 ID 或链外事件仍为 unknown，不按任务/节点名称放行。`execution.subtask_error_attributions` 保留原 ID、归属主链 ID、行号和依据；原始错误不删除，也不证明其无害。2026-09-24 已用已有 StartUp 日志只读回放验证，不是新的游戏运行验收。
+
+#### 只读复核既有执行报告
+
+升级 runner 后需要解释原报告，或出现 `event_outside_active_chain` 等边界异常时，先复核原始证据，不凭错误名称归因到模拟器、网络或账号，也不先重跑游戏：
+
+```text
+python <skill-root>/scripts/run_with_evidence.py --inspect-report <原runner报告.json>
+```
+
+入口只读取 schema 1/2 报告指定的日志字节区间并校验哈希（单区间上限 64 MiB），不调用 MAA、不写文件，拒绝与运行命令、`--core-log` 或 `--report-file` 混用。输出普通 JSON，保留 `original_wrapper_exit_code`，给出 `reassessed_wrapper_exit_code`、新版执行判断及全部子任务错误/内部错误行号；成功复核的进程退出码采用重新评估值，证据无效则返回 74。原报告不改写，日志尾部正常追加不影响原区间；原区间被覆盖或无法读取时保持 unknown。
+
+复核结果为 completed 只撤销执行边界的疑点，`business_result` 仍为 not_evaluated；它不消除真实重试，不核验目标账号，也不替换下游业务组件对原报告的严格检查。`continuation=requires_business_preconditions` 不是续跑许可。需要继续时先按[账号核验](multi-account.md#执行门禁)及当前设备、游戏日、界面与资源前置重新判断，不编辑原报告退出码来绕过组件门禁。
 
 #### 执行状态、内部异常与业务结果分层
 

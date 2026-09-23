@@ -34,7 +34,7 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 - 单设备切号、多个已登录账号依次复用同一 task：读取 [references/multi-account.md](references/multi-account.md)。
 - Windows MuMu、模拟器自带 ADB、实例与端口：读取 [references/mumu-windows.md](references/mumu-windows.md)。
 - Custom 任务、用户资源、局部状态恢复或严格白名单购买：读取 [references/custom-tasks.md](references/custom-tasks.md)。
-- 授权、资源风险、长任务等待和结果分类：读取 [references/safety-and-results.md](references/safety-and-results.md)。
+- 授权、资源风险、长任务等待和结果分类：读取 [references/safety-and-results.md](references/safety-and-results.md)。执行边界异常或升级后复核旧报告，使用该页的 `run_with_evidence.py --inspect-report` 只读入口，不按错误名称归因或先重跑游戏。
 - 需要低风险起点时使用 [assets/daily.toml](assets/daily.toml)；需要覆盖常见日常组件的参考时使用 [assets/full-daily.example.toml](assets/full-daily.example.toml)。两者都必须先按用户偏好和当前版本 review，不得未经检查原样执行。
 
 ## 完成一次日常请求

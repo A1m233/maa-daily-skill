@@ -33,14 +33,28 @@ KNOWN_SUBCOMMANDS = {
 }
 LEVEL_PATTERN = re.compile(r"\]\[(TRC|DBG|INF|WRN|ERR|CRT)\]\[")
 TAIL_WINDOW = 512
+LOG_LANE = re.compile(r"\[(P[^\]]+)\]\[(T[^\]]+)\]")
+
+
+def _callback_context(line: str, value: dict) -> tuple:
+    lane = LOG_LANE.search(line)
+    uuid = value.get("uuid")
+    return (lane.groups() if lane else None, uuid if isinstance(uuid, str) and uuid else None)
+
+
+def _context_conflicts(left: tuple, right: tuple) -> bool:
+    return any(a is not None and b is not None and a != b for a, b in zip(left, right))
+
 
 def classify_execution(lines: list[str], start_line: int = 1) -> dict:
     """Judge the execution boundary, never infer business success from errors.
 
     SubTaskError remains diagnostic even when the enclosing chain completes.
-    No node-name exemptions and no attempt to reconstruct hidden parent scopes.
+    Default-ID children need a unique active chain in the same log/device context.
+    This attributes diagnostics, not a hidden exception tree or business success.
     """
     chains, active, issues = {}, set(), []
+    contexts, attributions = {}, []
     failed = False
     for number, line in enumerate(lines, start_line):
         if CALLBACK_MARKER not in line:
@@ -55,18 +69,40 @@ def classify_execution(lines: list[str], start_line: int = 1) -> dict:
             if event not in TASKCHAIN_EVENTS and event != "SubTaskError":
                 continue
             chain, taskid = value.get("taskchain"), value.get("taskid")
-            if not isinstance(chain, str) or type(taskid) is not int:
+            if not isinstance(chain, str) or not chain or type(taskid) is not int or taskid < 0:
                 issues.append({"line": number, "reason": "missing_chain_identity"})
                 continue
             key = (chain, taskid)
+            context = _callback_context(line, value)
             if event == "TaskChainStart":
                 if key in chains:
                     issues.append({"line": number, "reason": "reused_chain_identity"})
                 chains[key] = "running"
+                contexts[key] = context
                 active.add(key)
+                continue
+            if event == "SubTaskError":
+                owner, basis = None, "callback_identity"
+                if key in active and not _context_conflicts(contexts[key], context):
+                    owner = key
+                elif taskid == 0 and key not in active and all(part is not None for part in context):
+                    candidates = [k for k in active if k[0] == chain and k[1] > 0
+                                  and contexts[k] == context]
+                    if len(candidates) == 1:
+                        owner, basis = candidates[0], "default_id_unique_active_chain"
+                    elif len(candidates) > 1:
+                        issues.append({"line": number, "reason": "ambiguous_subtask_parent"})
+                        continue
+                if owner is None:
+                    issues.append({"line": number, "reason": "event_outside_active_chain"})
+                else:
+                    attributions.append({"line": number, "taskchain": chain,
+                                         "reported_taskid": taskid, "parent_taskid": owner[1], "basis": basis})
                 continue
             if key not in active:
                 issues.append({"line": number, "reason": "event_outside_active_chain"})
+            elif _context_conflicts(contexts[key], context):
+                issues.append({"line": number, "reason": "chain_context_mismatch"})
             if event in {"TaskChainError", "TaskChainStopped"}:
                 failed = True
             if event in TASKCHAIN_EVENTS:
@@ -75,9 +111,50 @@ def classify_execution(lines: list[str], start_line: int = 1) -> dict:
         except (ValueError, TypeError):
             issues.append({"line": number, "reason": "invalid_callback"})
     status = "failed" if failed else "unknown" if issues or active or not chains else "completed"
-    return {"policy": "execution-boundary-v1", "status": status, "issues": issues,
+    return {"policy": "execution-boundary-v2", "status": status, "issues": issues,
+            "subtask_error_attributions": attributions,
             "incomplete_chains": [{"taskchain": c, "taskid": i} for c, i in sorted(active)],
             "business_result": "not_evaluated"}
+
+
+def inspect_execution_report(report: dict) -> dict:
+    """Reassess a sealed byte interval without rewriting it or authorizing resume."""
+    result = {"status": "unknown", "reason": "invalid_evidence", "business_result": "not_evaluated",
+              "continuation": "blocked_execution", "original_wrapper_exit_code": report.get("wrapper_exit_code")}
+    evidence = report.get("evidence", {})
+    start, end, first_line = evidence.get("before_size"), evidence.get("after_size"), evidence.get("start_line")
+    child_exit = report.get("child_exit_code")
+    if (report.get("schema_version") not in (1, 2) or type(report.get("wrapper_exit_code")) is not int
+            or evidence.get("state") != "bounded" or type(start) is not int or type(end) is not int
+            or not 0 <= start < end or end - start > 64 * 1024 * 1024
+            or type(first_line) is not int or first_line < 1 or type(child_exit) is not int):
+        return result
+    with Path(evidence["log_file"]).open("rb") as handle:
+        handle.seek(start)
+        data = handle.read(end - start)
+    if len(data) != end - start or hashlib.sha256(data).hexdigest() != evidence.get("interval_sha256"):
+        result["reason"] = "log_interval_changed_or_unhashed"
+        return result
+    parsed = _parse_callbacks(data, first_line)
+    execution = parsed["execution"]
+    if child_exit != 0:
+        code = child_exit
+    elif report.get("runner_error") or parsed["callback_parse_error_lines"]:
+        code = EVIDENCE_UNAVAILABLE_EXIT
+    elif execution["status"] == "failed":
+        code = TASKCHAIN_ERROR_EXIT
+    elif execution["status"] != "completed":
+        code = EVIDENCE_UNAVAILABLE_EXIT
+    else:
+        code = 0
+    result.update(status="evaluated", reason="execution_only_not_business_success", execution=execution,
+                  reassessed_wrapper_exit_code=code, runner_error=report.get("runner_error"),
+                  child_exit_code=child_exit, interval_sha256=evidence["interval_sha256"],
+                  subtask_error_lines=parsed["subtask_error_lines"],
+                  internal_error_lines=parsed["internal_error_lines"],
+                  callback_parse_error_lines=parsed["callback_parse_error_lines"],
+                  continuation="requires_business_preconditions" if code == 0 else "blocked_execution")
+    return result
 
 
 def _utc_now() -> str:
@@ -303,6 +380,8 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optionally write the machine-readable report to this local path.",
     )
+    parser.add_argument("--inspect-report", type=Path,
+                        help="只读校验原报告日志区间并复核执行边界，不启动 MAA、不改写报告")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser
 
@@ -310,6 +389,17 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.inspect_report is not None:
+        if args.command or args.core_log is not None or args.report_file is not None:
+            parser.error("--inspect-report cannot be combined with a command or output/log overrides")
+        try:
+            value = inspect_execution_report(json.loads(args.inspect_report.read_text(encoding="utf-8")))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+            value = {"status": "unknown", "reason": "unreadable_or_invalid_evidence",
+                     "error_type": type(error).__name__, "business_result": "not_evaluated",
+                     "continuation": "blocked_execution"}
+        print(json.dumps(value, ensure_ascii=False))
+        return int(value.get("reassessed_wrapper_exit_code", EVIDENCE_UNAVAILABLE_EXIT))
     command = list(args.command)
     if command and command[0] == "--":
         command = command[1:]

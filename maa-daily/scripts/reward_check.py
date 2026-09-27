@@ -10,9 +10,11 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import tempfile
 import tomllib
 import uuid
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 PREFIX = "MaaDailyCheck@"
 ENTRY = PREFIX + "RewardScan"
@@ -319,55 +321,72 @@ def read_page_recheck(report: dict, navigation_report: dict) -> dict:
             "observations": recognized, "observed_at": report["ended_at"]}
 
 
-def scan_once(maa: str, profile: str, output: Path) -> tuple[dict, Path]:
+def scan_once(maa: str, profile: str, output: Path | None = None, *, parent=None) -> tuple[dict, Path]:
+    from artifacts import ArtifactError, ArtifactRun, safe_path
     config = check_install(maa)
-    output.mkdir(parents=True, exist_ok=True)
-    run_dir = Path(tempfile.mkdtemp(prefix="reward-scan-", dir=output))
+    artifacts = ArtifactRun.begin(config, output, "reward-scan", prefix="reward-scan-", parent=parent)
+    run_dir = artifacts.path
+    env = artifacts.environment()
     report_file = run_dir / "evidence.json"
     nav_report = run_dir / "navigation.json"
     recheck_report = run_dir / "page-recheck.json"
     name = "maa-reward-nav-" + uuid.uuid4().hex
     nav_task = config / "tasks" / (name + ".json")
-    with nav_task.open("x", encoding="utf-8") as handle:
-        json.dump({"tasks": [{"type": "Custom", "params": {"task_names": [PREFIX + "RewardNav"]}}]}, handle)
-    (run_dir / "navigation-task.json").write_bytes(nav_task.read_bytes())
     runner = str(Path(__file__).with_name("run_with_evidence.py"))
+    temporary_tasks = []
+    settled = False
+    def create_task(path, entry, copy_name):
+        safe_path(path, missing=True)
+        with path.open("x", encoding="utf-8") as handle:
+            json.dump({"tasks": [{"type": "Custom", "params": {"task_names": [entry]}}]}, handle)
+        artifacts.register_file(path)
+        temporary_tasks.append(path)
+        (run_dir / copy_name).write_bytes(path.read_bytes())
     def execute(task, target):
         command = [maa, "run", task, "--batch", "--profile", profile, "--user-resource"]
-        subprocess.run(command + ["--dry-run"], check=True)
-        return subprocess.run([sys.executable, "-B", runner, "--report-file", str(target), "--", *command]).returncode
+        subprocess.run(command + ["--dry-run"], check=True, env=env)
+        return subprocess.run([sys.executable, "-B", runner, "--report-file", str(target), "--", *command], env=env).returncode
     result = unknown("navigation_failed")
     try:
-        print("仅导航到任务页并扫描，不领取奖励。", flush=True)
-        if execute(name, nav_report):
-            raise ValueError("navigation_runner_failed")
-        navigation = json.loads(nav_report.read_text(encoding="utf-8"))
-        result = unknown("page_verification_failed")
-        nav = read_navigation(navigation)
-        if nav["status"] == "recheck_required":
-            recheck_name = name + "-page"
-            recheck_task = config / "tasks" / (recheck_name + ".json")
-            with recheck_task.open("x", encoding="utf-8") as handle:
-                json.dump({"tasks": [{"type": "Custom", "params": {"task_names": [PREFIX + PAGE_READS[0]]}}]}, handle)
-            (run_dir / "page-recheck-task.json").write_bytes(recheck_task.read_bytes())
+        try:
+            create_task(nav_task, PREFIX + "RewardNav", "navigation-task.json")
+            print("仅导航到任务页并扫描，不领取奖励。", flush=True)
+            if execute(name, nav_report):
+                raise ValueError("navigation_runner_failed")
+            navigation = json.loads(nav_report.read_text(encoding="utf-8"))
+            result = unknown("page_verification_failed")
+            nav = read_navigation(navigation)
+            if nav["status"] == "recheck_required":
+                recheck_name = name + "-page"
+                recheck_task = config / "tasks" / (recheck_name + ".json")
+                create_task(recheck_task, PREFIX + PAGE_READS[0], "page-recheck-task.json")
+                result["page_recheck_report"] = str(recheck_report)
+                if execute(recheck_name, recheck_report):
+                    raise ValueError("page_recheck_runner_failed")
+                nav = read_page_recheck(json.loads(recheck_report.read_text(encoding="utf-8")), navigation)
+            result = unknown("scan_failed")
+            if execute(TASK, report_file):
+                result = unknown("scan_runner_failed")
+            else:
+                result = evaluate(json.loads(report_file.read_text(encoding="utf-8")))
+            result["navigation"] = nav
+        except (ArtifactError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+            result["error"] = str(error)
+        settled = True
+        result["navigation_report"] = str(nav_report)
+        if recheck_report.exists():
             result["page_recheck_report"] = str(recheck_report)
-            if execute(recheck_name, recheck_report):
-                raise ValueError("page_recheck_runner_failed")
-            nav = read_page_recheck(json.loads(recheck_report.read_text(encoding="utf-8")), navigation)
-        result = unknown("scan_failed")
-        if execute(TASK, report_file):
-            result = unknown("scan_runner_failed")
-        else:
-            result = evaluate(json.loads(report_file.read_text(encoding="utf-8")))
-        result["navigation"] = nav
-    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
-        result["error"] = str(error)
-    result["navigation_report"] = str(nav_report)
-    if recheck_report.exists():
-        result["page_recheck_report"] = str(recheck_report)
-    result["scan_report"] = str(report_file)
-    (run_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return result, run_dir
+        result["scan_report"] = str(report_file)
+        (run_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return result, run_dir
+    finally:
+        warnings = []
+        if settled:
+            for task in temporary_tasks:
+                warnings.extend(artifacts.remove_registered_file(task).get("warnings", []))
+        warnings.extend(artifacts.finish(result["status"], uncertain=not settled).get("warnings", []))
+        if warnings:
+            print("产物清理提示：" + json.dumps(warnings, ensure_ascii=False), file=sys.stderr)
 
 
 def main(argv=None) -> int:
@@ -380,10 +399,11 @@ def main(argv=None) -> int:
     scan = sub.add_parser("scan", help="先满足账号、可见窗口、设备与授权门禁；自动导航到任务页")
     scan.add_argument("--maa", default="maa")
     scan.add_argument("--profile", required=True)
-    scan.add_argument("--output-dir", type=Path, required=True, help="本地报告目录，每次建立独立子目录")
+    scan.add_argument("--output-dir", type=Path, help="可选输出父目录；默认使用 MAA 配置目录下的受管产物库")
     preflight = sub.add_parser("preflight", help="只读核对扫描资源部署，不运行游戏；profile 与页面起点仍需另行核验")
     preflight.add_argument("--maa", default="maa")
     args = parser.parse_args(argv)
+    from artifacts import ArtifactError
     try:
         if args.command == "preflight":
             check_install(args.maa)
@@ -397,7 +417,7 @@ def main(argv=None) -> int:
             result = evaluate(json.loads(args.report.read_text(encoding="utf-8")))
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result["status"] == "evaluated" else 2
-    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+    except (ArtifactError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         failure = ({"status": "not_ready", "reason": type(error).__name__,
                     "profile_checked": False, "game_state_checked": False}
                    if args.command == "preflight" else unknown(type(error).__name__))

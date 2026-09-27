@@ -14,6 +14,10 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Sequence
 
+# 兼容宿主启用 Python safe_path；只加入组件自身目录。
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 
 REPORT_PREFIX = "MAA_EVIDENCE_JSON="
 EVIDENCE_UNAVAILABLE_EXIT = 74
@@ -214,6 +218,17 @@ def _discover_core_log(executable: str) -> Path:
     return Path(lines[-1]) / "asst.log"
 
 
+def _discover_artifact_config(executable: str) -> Path:
+    result = subprocess.run(
+        [executable, "dir", "config", "--batch"], check=False,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if result.returncode != 0 or not lines or not Path(lines[-1]).is_absolute():
+        raise RuntimeError("maa dir config returned no absolute path")
+    return Path(lines[-1])
+
+
 def _read_appended(path: Path, start: int) -> bytes:
     with path.open("rb") as handle:
         handle.seek(start)
@@ -349,15 +364,16 @@ def _collect_evidence(
     return base
 
 
-def _emit_report(report: dict[str, Any], report_file: Path | None) -> int:
+def _emit_report(report: dict[str, Any], report_file: Path | None, *, exclusive: bool = False) -> int:
     if report_file is not None:
         try:
+            from artifacts import safe_path
+            safe_path(report_file, missing=True)
             report_file.parent.mkdir(parents=True, exist_ok=True)
-            report_file.write_text(
-                json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
-        except OSError as error:
+            safe_path(report_file, missing=True)
+            with report_file.open("x" if exclusive else "w", encoding="utf-8") as stream:
+                stream.write(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n")
+        except (OSError, RuntimeError, ValueError) as error:
             report["report_file_error"] = type(error).__name__
             if report["wrapper_exit_code"] == 0:
                 report["wrapper_exit_code"] = EVIDENCE_UNAVAILABLE_EXIT
@@ -378,59 +394,36 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--report-file",
         type=Path,
-        help="Optionally write the machine-readable report to this local path.",
+        help="Write to this exact new local file; otherwise use the managed run directory.",
     )
+    parser.add_argument("--artifact-config", type=Path,
+                        help="Override artifact config discovery for custom commands or isolated tests.")
     parser.add_argument("--inspect-report", type=Path,
                         help="只读校验原报告日志区间并复核执行边界，不启动 MAA、不改写报告")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-    if args.inspect_report is not None:
-        if args.command or args.core_log is not None or args.report_file is not None:
-            parser.error("--inspect-report cannot be combined with a command or output/log overrides")
-        try:
-            value = inspect_execution_report(json.loads(args.inspect_report.read_text(encoding="utf-8")))
-        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
-            value = {"status": "unknown", "reason": "unreadable_or_invalid_evidence",
-                     "error_type": type(error).__name__, "business_result": "not_evaluated",
-                     "continuation": "blocked_execution"}
-        print(json.dumps(value, ensure_ascii=False))
-        return int(value.get("reassessed_wrapper_exit_code", EVIDENCE_UNAVAILABLE_EXIT))
-    command = list(args.command)
-    if command and command[0] == "--":
-        command = command[1:]
-    if not command:
-        parser.error("a maa-cli command is required after --")
-
-    started_at = _utc_now()
-    command_summary = {
-        "executable": Path(command[0]).name,
-        "subcommand": _safe_subcommand(command),
+def _unavailable_report(started_at: str, command_summary: dict, error: Exception) -> dict:
+    return {
+        "schema_version": 2, "started_at": started_at, "ended_at": _utc_now(),
+        "command": command_summary, "child_exit_code": None,
+        "wrapper_exit_code": EVIDENCE_UNAVAILABLE_EXIT, "runner_error": type(error).__name__,
+        "evidence": {"state": "unavailable"}, "business_result": "not_evaluated",
     }
+
+
+def _run_command(command: list[str], core_log: Path | None, started_at: str,
+                 command_summary: dict, env: dict) -> dict:
     try:
-        core_log = args.core_log or _discover_core_log(command[0])
+        core_log = core_log or _discover_core_log(command[0])
         before = _snapshot(core_log)
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
-        report = {
-            "schema_version": 2,
-            "started_at": started_at,
-            "ended_at": _utc_now(),
-            "command": command_summary,
-            "child_exit_code": None,
-            "wrapper_exit_code": EVIDENCE_UNAVAILABLE_EXIT,
-            "runner_error": type(error).__name__,
-            "evidence": {"state": "unavailable"},
-            "business_result": "not_evaluated",
-        }
-        return _emit_report(report, args.report_file)
+        return _unavailable_report(started_at, command_summary, error)
 
     runner_error: str | None = None
     try:
-        child_exit_code = subprocess.run(command, check=False).returncode
+        child_exit_code = subprocess.run(command, check=False, env=env).returncode
     except KeyboardInterrupt:
         child_exit_code = 130
         runner_error = "KeyboardInterrupt"
@@ -453,7 +446,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif child_exit_code == 0 and evidence.get("execution", {}).get("status") != "completed":
         wrapper_exit_code = EVIDENCE_UNAVAILABLE_EXIT
 
-    report = {
+    return {
         "schema_version": 2,
         "started_at": started_at,
         "ended_at": _utc_now(),
@@ -464,7 +457,77 @@ def main(argv: Sequence[str] | None = None) -> int:
         "evidence": evidence,
         "business_result": "not_evaluated",
     }
-    return _emit_report(report, args.report_file)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.inspect_report is not None:
+        if (args.command or args.core_log is not None or args.report_file is not None
+                or args.artifact_config is not None):
+            parser.error("--inspect-report cannot be combined with a command or output/log overrides")
+        try:
+            value = inspect_execution_report(json.loads(args.inspect_report.read_text(encoding="utf-8")))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+            value = {"status": "unknown", "reason": "unreadable_or_invalid_evidence",
+                     "error_type": type(error).__name__, "business_result": "not_evaluated",
+                     "continuation": "blocked_execution"}
+        print(json.dumps(value, ensure_ascii=False))
+        return int(value.get("reassessed_wrapper_exit_code", EVIDENCE_UNAVAILABLE_EXIT))
+    command = list(args.command)
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        parser.error("a maa-cli command is required after --")
+
+    from artifacts import ArtifactError, ArtifactRun, safe_path
+
+    started_at = _utc_now()
+    command_summary = {"executable": Path(command[0]).name, "subcommand": _safe_subcommand(command)}
+    managed = None
+    exit_code = EVIDENCE_UNAVAILABLE_EXIT
+    settled = False
+    try:
+        try:
+            managed = ArtifactRun.current()
+            report_file = safe_path(args.report_file, missing=True) if args.report_file is not None else None
+            if (report_file is not None and report_file.exists()
+                    and (managed is None or not report_file.is_relative_to(managed.top))):
+                raise ArtifactError("artifact_existing_external_report")
+            if managed is None:
+                config = args.artifact_config or _discover_artifact_config(command[0])
+                managed = ArtifactRun.begin(config, None, "evidence", prefix="evidence-")
+            report_file = report_file or safe_path(managed.path / "evidence.json", missing=True)
+            exclusive = not report_file.is_relative_to(managed.top)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+            settled = True  # 尚未启动业务进程。
+            print(f"artifact_error: {error}", file=sys.stderr)
+            return _emit_report(_unavailable_report(started_at, command_summary, error), None)
+
+        print(f"MAA_EVIDENCE_REPORT={report_file}", flush=True)
+        report = _run_command(command, args.core_log, started_at, command_summary, managed.environment())
+        child_exit = report["child_exit_code"]
+        settled = child_exit is None or (child_exit >= 0 and child_exit != 130)
+        exit_code = _emit_report(report, report_file, exclusive=exclusive)
+        if "report_file_error" not in report:
+            try:
+                managed.register_file(report_file)
+            except Exception as error:
+                settled = False
+                print(f"artifact_warning: {error}", file=sys.stderr)
+        return exit_code
+    except KeyboardInterrupt:
+        exit_code = 130
+        settled = False
+        return exit_code
+    finally:
+        if managed is not None:
+            try:
+                cleanup = managed.finish(str(exit_code), uncertain=not settled)
+                for warning in cleanup.get("warnings", []):
+                    print(f"artifact_warning: {warning}", file=sys.stderr)
+            except Exception as error:
+                print(f"artifact_warning: {error}", file=sys.stderr)
 
 
 if __name__ == "__main__":

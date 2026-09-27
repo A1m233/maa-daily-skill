@@ -64,7 +64,7 @@ python <skill-root>/scripts/drain_sanity.py run --stage PR-D-2 --policy <本地�
 
 ## 结果与复用
 
-每个真实进程经薄 runner 保存区间哈希与内部告警。`processes.json` 记录临时 task、配置目录及导航隔离标志，原文件保留用于审计；不自动删除或中断后续跑。`result.json` 区分已核验场次、未知阶段、最新理智和药物提醒；开战后尚未重读时旧值只保留在 last_known_sanity，不用于补跑。
+每个真实进程经薄 runner 保存区间哈希与内部告警。`processes.json` 记录临时 task、配置目录及导航隔离标志；产物按[保留策略](artifacts.md)保存和淘汰，运行中不删除，中断后不自动续跑。`--output-dir` 可省略以使用固定受管库。`result.json` 区分已核验场次、未知阶段、最新理智和药物提醒；开战后尚未重读时旧值只保留在 last_known_sanity，不用于补跑。
 
 `completed_runs_basis=fully_verified_only` 表明 `completed_runs` 仅累计完整核验通过的阶段。战斗阶段失败时，组件仍从原报告哈希绑定的唯一 Fight 链提取 `battle_observation`：`observed_completed_runs` 是 `finished=true` 的日志计数，`latest_sanity` 带原观察时间，掉落识别失败单独保留。它不改变失败状态、不累计进已核验场次，也不恢复自动续跑；`usable_for_planning=false`，不能把历史读数直接作为当前预算。报告里的已核验零场不等于游戏未打，尤其不能据此原样重跑。顶层观测仅对应最后失败阶段，不是跨进程累计总数；链归属不明、日志变化或计数冲突时观测也返回 unknown。原生用药阶段和无药补尾均适用。
 

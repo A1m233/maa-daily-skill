@@ -170,11 +170,11 @@ def execute_flow(ops, save) -> dict:
 
 
 class Daily:
-    def __init__(self, config: dict, maa: str, profile: str, account: str, output: Path):
+    def __init__(self, config: dict, maa: str, profile: str, account: str, output: Path | None, *, artifacts=None):
         self.config, self.maa, self.profile, self.account = config, maa, profile, account
         self.day = game_day(dt.datetime.now(dt.timezone.utc))
         check_install(maa)
-        self.runtime = Runtime(maa, profile, output)
+        self.runtime = Runtime(maa, profile, output, artifacts=artifacts)
         self.output = self.runtime.output
         self.before, self.after, self.pre_reports, self.priority_reports = [], [], [], []
         for name in config["pre_tasks"]:
@@ -267,7 +267,7 @@ class Daily:
 
     def drain(self):
         target = self.output / "sanity"
-        env = os.environ.copy()
+        env = self.runtime.artifacts.environment()
         env["MAA_CONFIG_DIR"] = str(self.runtime.stage_config)
         code = subprocess.run([sys.executable, "-X", "utf8", "-B", str(HERE / "drain_sanity.py"), "run",
                 "--stage", self.stage, "--policy", str(self.policy), "--maa", self.maa, "--profile", self.profile,
@@ -293,7 +293,7 @@ class Daily:
         infrastructure = [inspect_infrast(r) for r in self.pre_reports
                           if any(c.get("taskchain") == "Infrast" for c in r["evidence"].get("task_chains", []))]
         self.check_day()
-        rewards, directory = scan_once(self.maa, self.profile, self.output / "rewards")
+        rewards, directory = scan_once(self.maa, self.profile, self.output / "rewards", parent=self.runtime.artifacts)
         value = {"status": "completed" if rewards["status"] == "evaluated" else "unverified",
                  "rewards": rewards, "reward_directory": str(directory), "infrastructure": infrastructure,
                  "reminder_required": rewards["reminder_required"] or any(r["reminder_required"] for r in infrastructure)}
@@ -308,11 +308,15 @@ def main(argv=None):
     parser.add_argument("--maa", default="maa")
     parser.add_argument("--profile", required=True)
     parser.add_argument("--account", required=True, help="本地报告别名，不执行切号；调用者先核验身份与设备")
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, help="可选输出根；省略时使用固定受管产物目录")
     parser.add_argument("--output-format", choices=["brief", "json"], default="brief",
                         help="run 的结束输出：默认用户简报；json 保留旧版详细结果输出，退出码不变")
     args = parser.parse_args(argv)
+    from artifacts import ArtifactError, ArtifactRun
     lock = None
+    artifacts = None
+    settled = False
+    artifact_status = "failed"
     try:
         config = load_config(args.config.resolve())
         # Exclusive cooperative lock per actual MAA config root, including preflight; never break stale locks.
@@ -320,7 +324,8 @@ def main(argv=None):
         lock_path = root / "maa-daily-run.lock"
         lock = lock_path.open("x", encoding="utf-8")
         lock.write(json.dumps({"pid": os.getpid(), "account": args.account})); lock.flush()
-        ops = Daily(config, args.maa, args.profile, args.account, args.output_dir)
+        artifacts = ArtifactRun.begin(root, args.output_dir, "daily-" + args.mode, prefix="daily-")
+        ops = Daily(config, args.maa, args.profile, args.account, args.output_dir, artifacts=artifacts)
         print("日常证据目录：" + str(ops.output), flush=True)
         if args.mode == "preflight":
             result = {"status": "prepared", "game_day": ops.day, "stage": ops.stage, "game_operated": False}
@@ -334,8 +339,11 @@ def main(argv=None):
             print("\n详细结果：" + str(ops.output / "daily-result.json"))
         else:
             print(json.dumps(result, ensure_ascii=False))
+        settled = True
+        artifact_status = result["status"]
         return 0 if result["status"] in {"prepared", "completed", "completed_with_reminder"} else 2
-    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, ArtifactError) as error:
+        settled = True
         failure = json.dumps({"status": "incomplete", "reason": str(error)}, ensure_ascii=False)
         if args.mode == "run" and args.output_format == "brief":
             print(f"\n用户简报：\n{args.account}：日常未完整完成，未能生成完整简报；请根据错误与已有证据核对停止位置，不要直接重跑。")
@@ -344,6 +352,10 @@ def main(argv=None):
             print(failure)
         return 2
     finally:
+        if artifacts is not None:
+            cleanup = artifacts.finish(artifact_status, uncertain=not settled)
+            if cleanup.get("warnings"):
+                print("产物清理提示：" + json.dumps(cleanup["warnings"], ensure_ascii=False), file=sys.stderr)
         if lock is not None:
             lock.close()
             # Interrupt/unhandled exception may leave a live child. Do not release its cooperative gate.

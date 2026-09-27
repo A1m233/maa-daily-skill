@@ -183,6 +183,7 @@ class DrainTests(unittest.TestCase):
                     patch.object(drain, "read_probe", side_effect=ValueError("sanity_unverified")), \
                     patch("medicine_sanity.preflight"), contextlib.redirect_stdout(io.StringIO()):
                 runtime = factory.return_value
+                runtime.artifacts.finish.return_value = {"warnings": []}
                 runtime.output, runtime.reports = Path(directory), []
                 runtime.run.return_value = {"evidence": {}}
                 self.assertEqual(drain.main(["run", "--stage", "1-7", "--profile", "test",
@@ -197,6 +198,7 @@ class DrainTests(unittest.TestCase):
                 patch("medicine_sanity.preflight"), \
                 contextlib.redirect_stdout(io.StringIO()):
             runtime = factory.return_value
+            runtime.artifacts.finish.return_value = {"warnings": []}
             runtime.output = Path(directory)
             runtime.run.side_effect = ValueError("runner_failed: 1")
             self.assertEqual(drain.main(["run", "--stage", "AP-5", "--profile", "test",

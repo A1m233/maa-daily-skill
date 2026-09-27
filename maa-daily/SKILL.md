@@ -21,6 +21,7 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 
 ## 按需读取资料
 
+- 本地报告、临时 task 和配置快照由组件按[运行产物策略](references/artifacts.md)自动登记和淘汰；默认 14 天、128 MiB，不管理 MAA 原始日志。一般不另选临时输出目录或编写清理脚本；容量/清理告警按该页处理，不据此重跑业务。
 - 分段日常的统一执行、避免剿灭后漏清体力：读 [references/daily-execution.md](references/daily-execution.md)，使用 `daily_run.py` 引用已有 task。账号身份和设备仍由外层核验，不自动恢复或切号。
 - 首次创建或重新整理任务：先读 [references/create-task.md](references/create-task.md)，统一基线、提问与交付流程。
 - 清体力日常的倍率计算、理智预检查与奖励检查组件：读 [references/daily-checks.md](references/daily-checks.md)，复用捆绑脚本/原生 task，不临时手搓；特殊材料目标仅参考算法。

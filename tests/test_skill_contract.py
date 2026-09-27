@@ -28,6 +28,8 @@ class SkillContractTests(unittest.TestCase):
             "scripts/daily_run.py",
             "scripts/recruit_check.py",
             "scripts/daily_report.py",
+            "scripts/artifacts.py",
+            "references/artifacts.md",
             "references/daily-summary.md",
             "assets/daily-run.example.toml",
             "references/daily-execution.md",

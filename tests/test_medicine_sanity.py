@@ -191,6 +191,7 @@ class MedicineTests(unittest.TestCase):
                     patch.object(module, "inspect_recovery", return_value={"completed_runs": 0, "medicine_used": 3}), \
                     patch.object(module, "check_fight") as checked, contextlib.redirect_stdout(io.StringIO()):
                 runtime = factory.return_value
+                runtime.artifacts.finish.return_value = {"warnings": []}
                 runtime.output, runtime.reports = root, []
                 code = module.main(["run", "--policy", str(policy), "--stage", "AP-5", "--profile", "test",
                                     "--output-dir", directory])

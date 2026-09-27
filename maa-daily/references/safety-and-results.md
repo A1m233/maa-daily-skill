@@ -73,7 +73,7 @@ python <skill-root>/scripts/run_with_evidence.py \
   -- maa run <task> --profile <profile> --batch
 ```
 
-runner 使用待执行命令的同一个 `maa` 可执行文件调用 `maa dir log --batch`，在运行前后记录 `asst.log` 的文件大小和行号，再输出以 `MAA_EVIDENCE_JSON=` 开头的单行 JSON。只有当前环境已经证明 MaaCore 日志位于另一个精确路径时，才使用 `--core-log <path>` 覆盖自动发现；不要把示例或旧会话路径写死。
+runner 使用待执行命令的同一个 `maa` 可执行文件调用 `maa dir log --batch`，在运行前后记录 `asst.log` 的文件大小和行号，再输出以 `MAA_EVIDENCE_JSON=` 开头的单行 JSON。报告默认写入[受管产物目录](artifacts.md)，无需每轮指定临时路径；上例的 `--report-file` 仅用于显式新文件，包外已有文件拒绝覆盖。只有当前环境已经证明 MaaCore 日志位于另一个精确路径时，才使用 `--core-log <path>` 覆盖自动发现；不要把示例或旧会话路径写死。
 
 报告只保留可复核的非业务结论：
 
@@ -293,7 +293,7 @@ dry-run 不执行 MaaCore 识别链，也不会发现所有模板、命名空间
 
 ## 文件清理
 
-- 只删除本次创建且已确认路径的候选文件。
+- 组件登记的运行产物由[统一保留策略](artifacts.md)清理，不由 Agent 按文件名或父目录猜测归属；策略之外仅删除当前请求明确覆盖且已确认归属和路径的候选文件。
 - 不自动删除用户备份；交由用户决定，或在当前请求明确包含清理时处理。
 - 替换失败时保留原文件与候选并报告，不执行宽泛目录清理。
 - 公开报告和仓库不得包含真实设备地址、账号、完整日志或个人绝对路径。

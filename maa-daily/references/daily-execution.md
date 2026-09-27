@@ -20,8 +20,8 @@
 调用 `run` 前必须先完成主 Skill 的[真实运行入口顺序](../SKILL.md#真实运行的入口顺序)：环境就绪 → 目标账号可信 → 单账号业务与收尾 → 满足继续条件后处理下一账号。执行器不承担前两步；`--account` 只是报告别名，不能充当身份断言。调用者须排除其它工具启动的 MAA 及会写同一日志的并发 dry-run。证据复用与失效、连接失败后的回溯也以该入口约定为准。
 
 ```text
-python <skill-root>/scripts/daily_run.py preflight --config <本机配置.toml> --maa <exe> --profile <profile> --account <本地别名> --output-dir <本地目录>
-python <skill-root>/scripts/daily_run.py run --config <本机配置.toml> --maa <exe> --profile <profile> --account <本地别名> --output-dir <本地目录>
+python <skill-root>/scripts/daily_run.py preflight --config <本机配置.toml> --maa <exe> --profile <profile> --account <本地别名>
+python <skill-root>/scripts/daily_run.py run --config <本机配置.toml> --maa <exe> --profile <profile> --account <本地别名>
 ```
 
 `preflight` 读取与 dry-run，不连接游戏、不部署资源；会建立本地证据/配置快照，不能称为零文件写入。先用 `daily_checks.py prepare` 部署资源，冲突按原流程处理，不自动覆盖。`run` 自己再次预检，不接受旧 preflight 作为运行许可；两者都不提供设备在线或账号身份核验，不能因为执行器会在连接错误后停止，就用真实业务代替环境检查。
@@ -43,7 +43,7 @@ python <skill-root>/scripts/daily_run.py run --config <本机配置.toml> --maa 
 
 每个阶段前后检查国服服务器游戏日（UTC+8、04:00）；跨日后不自动继续下一阶段，也不把已有消耗归零。长战斗在当前进程内自然结束，不在换日瞬间强杀。
 
-本轮报告保存在唯一目录：plan.json、原 task 源快照、dry-run 原文、processes.json、各组件报告与 daily-result.json。日常配置、选出的参数和用药策略在运行前固定；真实 task 在隔离配置中生成，不改原业务文件。
+本轮报告保存在唯一目录：plan.json、原 task 源快照、dry-run 原文、processes.json、各组件报告与 daily-result.json。默认输出与保留期限由[运行产物策略](artifacts.md)负责；可选 `--output-dir` 指定父目录，但仍受同一策略管理。日常配置、选出的参数和用药策略在运行前固定；真实 task 在隔离配置中生成，不改原业务文件。
 
 ## 汇报与恢复
 

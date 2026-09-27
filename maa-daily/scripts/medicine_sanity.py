@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 
 from daily_checks import stage_cost
 from drain_sanity import Runtime, callbacks, navigate, read_probe, write_json
@@ -119,10 +120,13 @@ def main(argv=None) -> int:
     parser.add_argument("--cost", type=int, help="未收录关卡的已核实单场理智")
     parser.add_argument("--profile", required=True)
     parser.add_argument("--maa", default="maa")
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, help="可选输出根；省略时使用固定受管产物目录")
     parser.add_argument("--dialog-open", action="store_true")
     args = parser.parse_args(argv)
+    from artifacts import ArtifactError
     runtime = None
+    settled = False
+    artifact_status = "failed"
     try:
         args.stage = normalize_stage(args.stage)
         cost = stage_cost(args.stage, args.cost)
@@ -137,13 +141,21 @@ def main(argv=None) -> int:
         result.update(observed_at=dt.datetime.now(dt.timezone.utc).isoformat(), stage=args.stage)
         write_json(runtime.output / "result.json", result)
         print(json.dumps(result, ensure_ascii=False))
+        settled = True
+        artifact_status = result["status"]
         return 0 if result["status"] == "detected" else 2
-    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, ArtifactError) as error:
+        settled = True
         result = {"status": "unknown", "reason": str(error), "reminder_required": True}
         if runtime is not None:
             write_json(runtime.output / "failure.json", result)
         print(json.dumps(result, ensure_ascii=False))
         return 2
+    finally:
+        if runtime is not None:
+            cleanup = runtime.artifacts.finish(artifact_status, uncertain=not settled)
+            if cleanup.get("warnings"):
+                print("产物清理提示：" + json.dumps(cleanup["warnings"], ensure_ascii=False), file=sys.stderr)
 
 
 if __name__ == "__main__":

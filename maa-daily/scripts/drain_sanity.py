@@ -12,7 +12,6 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import tempfile
 import uuid
 
 from daily_checks import inspect_report, plan, stage_cost
@@ -401,7 +400,8 @@ def run_daily(observe, fight, recover, check, save, *, policy, cost, maximum, ma
 
 
 class Runtime:
-    def __init__(self, maa: str, profile: str, output: Path):
+    def __init__(self, maa: str, profile: str, output: Path | None, *, artifacts=None):
+        from artifacts import ArtifactRun
         self.maa, self.profile = maa, profile
         query = subprocess.run([maa, "dir", "config", "--batch"], check=True, capture_output=True,
                                text=True, encoding="utf-8", timeout=30)
@@ -413,8 +413,8 @@ class Runtime:
                 if key in {PREFIX + s for s in ("StagePage", "Sanity", "SanityConfirm")}:
                     if resource.get(key) != value:
                         raise ValueError("probe_resource_missing_or_changed: " + key)
-        output.mkdir(parents=True, exist_ok=True)
-        self.output = Path(tempfile.mkdtemp(prefix="drain-", dir=output))
+        self.artifacts = artifacts or ArtifactRun.begin(self.config, output, "drain")
+        self.output = self.artifacts.path
         self.reports = []
 
     def configure_stage(self, stage: str) -> None:
@@ -428,7 +428,8 @@ class Runtime:
         config = getattr(self, "stage_config", self.config)
         if navigation:
             config = self.navigation_config
-        env = os.environ.copy()
+        owner = getattr(self, "artifacts", None)
+        env = owner.environment() if owner is not None else os.environ.copy()
         env["MAA_CONFIG_DIR"] = str(config)
         if config != self.config:
             query = subprocess.run([self.maa, "dir", "config", "--batch"], env=env, check=True,
@@ -439,7 +440,7 @@ class Runtime:
         target = config / "tasks" / (name + ".json")
         with target.open("x", encoding="utf-8") as handle:
             json.dump({"tasks": tasks}, handle, ensure_ascii=False)
-        # Keep exact generated task paths for audit; no automatic deletion or retry.
+        # Generated tasks remain with their owning run until retention removes the run.
         record = {"phase": phase, "task_file": str(target), "report_file": str(self.output / (name + ".json"))}
         record["config_dir"] = str(config)
         record["navigation_guard"] = navigation
@@ -484,7 +485,7 @@ def main(argv=None) -> int:
                         help="默认 auto：由 MAA 导航并确认起点；旧显式起点仅供诊断兼容")
     parser.add_argument("--maa", default="maa")
     parser.add_argument("--profile", required=True)
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, help="可选输出根；省略时使用固定受管产物目录")
     parser.add_argument("--cost", type=int, help="默认按关卡表取值；旧调用显式传入时必须一致，不能覆盖")
     parser.add_argument("--maximum", type=int, default=10)
     parser.add_argument("--max-phases", type=int, default=5)
@@ -494,6 +495,10 @@ def main(argv=None) -> int:
     if args.mode == "run" and (not 1 <= args.maximum <= 10
                                or args.max_phases < 1 or args.max_runs < 1):
         parser.error("run requires positive budgets, maximum in 1..10")
+    from artifacts import ArtifactError
+    runtime = None
+    settled = False
+    artifact_status = "failed"
     try:
         args.stage = normalize_stage(args.stage)
         cost = stage_cost(args.stage, args.cost)  # 在目录发现、导航或任何游戏操作前拦截错误成本。
@@ -535,10 +540,18 @@ def main(argv=None) -> int:
                                           or r.get("runner_exit_code") or r.get("report_error")]
         write_json(runtime.output / "result.json", result)
         print(json.dumps(result, ensure_ascii=False))
+        settled = True
+        artifact_status = result["status"]
         return 0 if result["status"] in {"completed", "completed_with_reminder", "observed"} else 2
-    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, ArtifactError) as error:
+        settled = True
         print(json.dumps({"status": "stopped", "reason": str(error), "reminder_required": True}, ensure_ascii=False))
         return 2
+    finally:
+        if runtime is not None:
+            cleanup = runtime.artifacts.finish(artifact_status, uncertain=not settled)
+            if cleanup.get("warnings"):
+                print("产物清理提示：" + json.dumps(cleanup["warnings"], ensure_ascii=False), file=sys.stderr)
 
 
 if __name__ == "__main__":

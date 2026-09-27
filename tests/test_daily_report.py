@@ -179,23 +179,29 @@ class ReportTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 summarize_many(results, accounts, day)
 
-    def test_cli_multi_missing_preserves_source_and_refuses_output_overwrite(self):
+    def test_cli_multi_missing_preserves_source_and_uses_owned_export(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)
             source = root / 'result.json'
             source.write_text(json.dumps(self.complete_result('A')), encoding='utf-8')
             before = source.read_bytes()
             args = ['--daily-result', str(source), '--expect-account', 'A', '--expect-account', 'B',
-                    '--game-day', '2026-09-14', '--output-dir', str(root/'brief'), '--json']
-            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    '--game-day', '2026-09-14', '--output-dir', str(root/'brief'),
+                    '--artifact-config', str(root/'config'), '--json']
+            with contextlib.redirect_stdout(io.StringIO()) as stdout, contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(args), 2)
             value = json.loads(stdout.getvalue())
             self.assertEqual(value['missing_accounts'], ['B'])
-            written = (root/'brief/brief.json').read_bytes()
-            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            first = next((root/'brief').glob('brief-*/brief.json'))
+            written = first.read_bytes()
+            with contextlib.redirect_stdout(io.StringIO()) as stdout, contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(args), 2)
-            self.assertEqual(json.loads(stdout.getvalue())['status'], 'unknown')
-            self.assertEqual(written, (root/'brief/brief.json').read_bytes())
+            self.assertEqual(json.loads(stdout.getvalue())['status'], 'incomplete')
+            self.assertEqual(written, first.read_bytes())
+            self.assertEqual(len(list((root/'brief').glob('brief-*/brief.json'))), 2)
+            index = json.loads((root/'config/maa-daily-artifacts/index.json').read_text(encoding='utf-8'))
+            self.assertEqual(len(index['runs']), 2)
+            self.assertTrue(all(r['state'] == 'finished' for r in index['runs']))
             self.assertEqual(source.read_bytes(), before)
             # Existing single-account CLI is unchanged and does not need an account list.
             with contextlib.redirect_stdout(io.StringIO()) as stdout:

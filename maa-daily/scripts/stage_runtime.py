@@ -37,13 +37,29 @@ def stop_resource() -> dict:
     return {name: copy.deepcopy(stop) for node in STOP_NODES for name in (node, "Fight@" + node)}
 
 
+def _snapshot_backups(source: Path, directory: str, names: list[str]) -> set[str]:
+    relative = Path(directory).relative_to(source).parts
+    if relative[:1] == ("profiles",):
+        extension = r"(?:toml|json|yaml|yml)"
+    elif relative[:2] == ("resource", "tasks"):
+        extension = "json"
+    else:
+        return set()
+    # 只识别配置文件的显式备份；模板名和目录可以合法包含 .bak。
+    suffix = r"\.bak(?:-(?:[0-9a-f]{32}|\d{8}(?:-\d{4,6})?))?"
+    return {name for name in names
+            if re.fullmatch(r".+\." + extension + suffix, name, re.IGNORECASE)
+            and (Path(directory) / name).is_file()}
+
+
 def isolated_config(source: Path, target: Path, stage: str, *, navigation: bool) -> Path:
     """新目录快照，不改用户 profile/resource。守卫仅注入导航快照。"""
     normalize_stage(stage)
     target.mkdir(parents=True, exist_ok=False)
     for folder in ("profiles", "resource"):
         if (source / folder).is_dir():
-            shutil.copytree(source / folder, target / folder)
+            shutil.copytree(source / folder, target / folder,
+                            ignore=lambda directory, names: _snapshot_backups(source, directory, names))
     for file in ("asst.toml", "asst.json", "asst.yaml", "asst.yml", "cli.toml", "cli.json", "cli.yaml", "cli.yml"):
         if (source / file).is_file():
             shutil.copy2(source / file, target / file)

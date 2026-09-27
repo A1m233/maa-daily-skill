@@ -5,6 +5,7 @@ import json
 import datetime as dt
 from pathlib import Path
 import sys
+import subprocess
 
 # 可由启用 safe_path 的宿主直接调用；只加入本脚本所属的受信任组件目录。
 if __name__ == "__main__":
@@ -171,9 +172,14 @@ def main(argv=None):
     parser.add_argument("--game-day", help="多账号汇总要求的服务器游戏日 YYYY-MM-DD，不自动采用今天")
     parser.add_argument("--recruit-report", type=Path, action="append", default=[],
                         help="只读回放旧结果缺少的公招报告；调用者先核验同账号同游戏日，不用于自动恢复")
-    parser.add_argument("--output-dir", type=Path, help="新建本地简报目录，已存在则拒绝，不改原报告")
+    parser.add_argument("--output-dir", type=Path, help="可选导出父目录；在其中新建受管子目录，不改原报告")
+    parser.add_argument("--maa", default="maa", help="导出文件时用于发现实际配置目录；纯 stdout 模式不调用")
+    parser.add_argument("--artifact-config", type=Path, help="离线导出时显式指定产物策略所属的 MAA 配置目录")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
+    from artifacts import ArtifactError, ArtifactRun
+    artifacts = None
+    settled = False
     try:
         if args.expect_account:
             if not args.game_day or args.recruit_report:
@@ -185,12 +191,25 @@ def main(argv=None):
                 raise ValueError("single_result_or_explicit_expected_accounts_required")
             result = summarize_with_recruit(args.daily_result[0], args.recruit_report)
         if args.output_dir:
-            args.output_dir.mkdir(parents=True, exist_ok=False)
-            (args.output_dir / "brief.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-            (args.output_dir / "brief.md").write_text(result["text"] + "\n", encoding="utf-8")
-    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+            config = args.artifact_config
+            if config is None:
+                query = subprocess.run([args.maa, "dir", "config", "--batch"], check=True,
+                                       capture_output=True, text=True, encoding="utf-8", timeout=30)
+                config = Path(query.stdout.strip().splitlines()[-1])
+            artifacts = ArtifactRun.begin(config, args.output_dir, "brief", prefix="brief-")
+            (artifacts.path / "brief.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            (artifacts.path / "brief.md").write_text(result["text"] + "\n", encoding="utf-8")
+            print("简报目录：" + str(artifacts.path), file=sys.stderr)
+        settled = True
+    except (ArtifactError, OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError) as error:
+        settled = True
         result = {"status": "unknown", "reminder_required": True, "reason": str(error),
                   "text": "报告读取或汇总校验未通过，日常完成情况未知；请核对输入，不据此重跑游戏。"}
+    finally:
+        if artifacts is not None:
+            cleanup = artifacts.finish(result.get("status", "failed"), uncertain=not settled)
+            if cleanup.get("warnings"):
+                print("产物清理提示：" + json.dumps(cleanup["warnings"], ensure_ascii=False), file=sys.stderr)
     print(json.dumps(result, ensure_ascii=False) if args.json else result["text"])
     return 2 if result["status"] in {"unknown", "incomplete"} else 0
 

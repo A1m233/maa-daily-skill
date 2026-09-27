@@ -78,6 +78,58 @@ class StageTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 stage.isolated_config(source, root / "normal", "1-7", navigation=False)
 
+    def test_snapshot_omits_only_explicit_config_backups_and_keeps_navigation_guards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            backups = (
+                "profiles/mumu.toml.bak-20260817-0102",
+                "profiles/default.json.bak",
+                "profiles/other.yaml.bak-20260928",
+                "profiles/other.yml.bak-20260928-010203",
+                "resource/tasks/tasks.json.bak-" + "a1" * 16,
+                "resource/tasks/nested/custom.json.bak",
+            )
+            preserved = (
+                "profiles/mumu.toml", "profiles/default.json", "profiles/other.yaml", "profiles/other.yml",
+                "profiles/mumu.toml.bak-manual", "profiles/mumu.bak.toml",
+                "profiles/dir.toml.bak-20260817-0102/active.toml",
+                "resource/template/StartButton2.png", "resource/template/image.png.bak",
+                "resource/template/tasks.json.bak-" + "a1" * 16,
+                "resource/template/cache.bak-20260817-0102/image.png",
+                "resource/models/model.onnx", "resource/config.json.bak",
+                "resource/tasks/custom.json.bak-manual",
+            )
+            for name in (*backups, *preserved):
+                file = source / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(b"unchanged fixture")
+            active = source / "resource/tasks/nested/custom.bak.json"
+            active.write_text(json.dumps({"Custom@StartButton2": {"action": "ClickSelf"},
+                                          "CustomTemplate": {"template": "image.png.bak"}}), encoding="utf-8")
+            originals = {file.relative_to(source): file.read_bytes() for file in source.rglob("*") if file.is_file()}
+            for navigation in (False, True):
+                with self.subTest(navigation=navigation):
+                    snapshot = stage.isolated_config(source, root / str(navigation), "1-7", navigation=navigation)
+                    for name in backups:
+                        self.assertFalse((snapshot / name).exists(), name)
+                    for name in preserved:
+                        self.assertEqual((snapshot / name).read_bytes(), originals[Path(name)], name)
+                    custom = json.loads((snapshot / active.relative_to(source)).read_text(encoding="utf-8"))
+                    self.assertEqual(custom["CustomTemplate"]["template"], "image.png.bak")
+                    self.assertEqual(custom["Custom@StartButton2"]["action"], "Stop" if navigation else "ClickSelf")
+                    if navigation:
+                        self.assertEqual(custom["Custom@StartButton2"], stage.stop_resource()["StartButton2"])
+                    nodes = json.loads((snapshot / "resource/tasks/tasks.json").read_text(encoding="utf-8"))
+                    self.assertEqual(nodes[stage.VERIFY]["text"], ["1-7"])
+                    for name, guard in stage.stop_resource().items():
+                        if navigation:
+                            self.assertEqual(nodes[name], guard)
+                        else:
+                            self.assertNotIn(name, nodes)
+            self.assertEqual({file.relative_to(source): file.read_bytes()
+                              for file in source.rglob("*") if file.is_file()}, originals)
+
     def test_native_dryrun_failure_never_starts_runner(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

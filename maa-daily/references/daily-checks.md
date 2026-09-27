@@ -52,7 +52,7 @@ python <skill-root>/scripts/reward_check.py --layout cn-daily-ten-v1 preflight -
 python <skill-root>/scripts/reward_check.py --layout cn-daily-ten-v1 scan --profile <profile> --output-dir <local-evidence-dir>
 ```
 
-`--maa <executable>` 可选择当前已核验的 maa-cli。脚本核对部署一致后，先经薄 runner 运行独立导航，再运行原生 `maa run maa-daily-reward-scan`，两者均先 dry-run。在独立本地子目录写 navigation.json、evidence.json 和 result.json；临时 task 保留用于审计。结果区分 navigation_failed、page_verification_failed 与 scan_runner_failed；前两项失败不会开始档位扫描。不要由 Agent 手工累计回调条数或重新编写同等扫描流程。
+`--maa <executable>` 可选择当前已核验的 maa-cli。脚本核对部署一致后，先经薄 runner 运行独立导航，再运行原生 `maa run maa-daily-reward-scan`，两者均先 dry-run。在受管子目录写 navigation.json、evidence.json 和 result.json，临时 task 副本留在包内；原生 tasks 目录中的本次临时文件按[产物策略](artifacts.md)清理。`--output-dir` 可省略以使用固定受管库。结果区分 navigation_failed、page_verification_failed 与 scan_runner_failed；前两项失败不会开始档位扫描。不要由 Agent 手工累计回调条数或重新编写同等扫描流程。
 
 页面标签置信度至少 0.9 时保留快速路径；顶部正确区域包含“日常任务”且分数在 0.8–0.9 时，由组件自动追加**一次同页只读复核**，不再次导航：两次 DoNothing OCR 均须出现位置稳定的日常标签，以及高置信周常、主线标签，顺序和区域正确。同一游戏日内，导航至复核结束合计不超过三分钟。缺标签、错位、冲突、错误回调或更低分数仍停止，不能由 Agent 自行降阈值重试。复核报告为 `page-recheck.json`；此机制只核验页面，不改变档位标记阈值和上下界算法。
 

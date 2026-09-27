@@ -131,8 +131,10 @@ class ExecutionResultTests(unittest.TestCase):
             path.write_bytes(data)
             return subprocess.CompletedProcess([], child_exit)
         output = io.StringIO()
-        with patch.object(runner.subprocess, "run", side_effect=execute), contextlib.redirect_stdout(output):
-            code = runner.main(["--core-log", str(path), "--", "fake-maa", "run", "test"])
+        with (patch.object(sys, "path", [str(Path(runner.__file__).parent), *sys.path]),
+              patch.object(runner.subprocess, "run", side_effect=execute), contextlib.redirect_stdout(output)):
+            code = runner.main(["--core-log", str(path), "--artifact-config", str(Path(directory) / "config"),
+                                "--", "fake-maa", "run", "test"])
         return code, json.loads(output.getvalue().split(runner.REPORT_PREFIX)[1])
 
     def test_arbitrary_child_errors_do_not_override_complete_execution(self):

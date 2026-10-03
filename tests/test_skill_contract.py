@@ -26,6 +26,8 @@ class SkillContractTests(unittest.TestCase):
             "scripts/medicine_sanity.py",
             "scripts/stage_runtime.py",
             "scripts/daily_run.py",
+            "scripts/account_plan.py",
+            "assets/accounts.example.toml",
             "scripts/recruit_check.py",
             "scripts/daily_report.py",
             "scripts/artifacts.py",
@@ -132,9 +134,6 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("不要用自定义切号 helper、虚构的未匹配账号或视觉点击", skill)
         self.assertIn("一个已确认设备/profile", reference)
         self.assertIn("StartUp(A) → 日常(A) → StartUp(B) → 日常(B)", reference)
-        self.assertIn("两个账号通常是四个进程", reference)
-        self.assertIn("两个账号通常是六个进程", reference)
-        self.assertIn("startup → bulk → cleanup/Award", reference)
         self.assertIn("不使用 Agent 视觉或 GUI 点击", reference)
         self.assertIn("停止剩余账号", reference)
         self.assertIn("登录已过期", reference)

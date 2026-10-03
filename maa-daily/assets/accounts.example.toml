@@ -1,0 +1,17 @@
+# 复制到本机 MAA config/policies/accounts.toml；不要放 tasks/ 或公开仓库。
+# 登录标识必须来自本机可信记录；下方仅是占位，不可原样运行。
+version = 1
+profile = "default"
+client = "Official"
+default_config = "daily-execution.toml" # 相对于本清单文件
+
+[[accounts]]
+alias = "A"
+account_name = "本机唯一登录标识甲"
+# 不写 config 时使用 default_config。
+
+[[accounts]]
+alias = "B"
+account_name = "本机唯一登录标识乙"
+config = "daily-execution-b.toml" # 完整执行器配置引用，不是字段合并
+# 若两号完全相同，删除此 config 行即可；也可不用 default_config，逐账号明确指定。

@@ -1,6 +1,6 @@
 ---
 name: maa-daily
-description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境、发现模拟器与 ADB、创建或维护原生 task/profile、dry-run，并为单个账号或单设备上的固定多账号列表安全运行一次个性化明日方舟日常。Use when 用户提到 MAA、maa-cli、明日方舟日常、MuMu 连接、MAA 自定义任务、配置日常、执行一次日常、切号、多账号依次跑同一 task 或排查单次 MAA 运行；不负责定时、无人值守或多设备编排。
+description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境、发现模拟器与 ADB、创建或维护原生 task/profile、dry-run，并为单个账号或单设备上的固定多账号列表安全运行一次个性化明日方舟日常。Use when 用户提到 MAA、maa-cli、明日方舟日常、MuMu 连接、MAA 自定义任务、配置日常、执行一次日常、切号、多账号共用或分别配置日常、排查单次 MAA 运行；不负责定时、无人值守或多设备编排。
 ---
 
 # MAA 个性化日常
@@ -9,7 +9,7 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 
 ## 真实运行的入口顺序
 
-收到执行日常请求时，先确认已有任务范围、账号列表与顺序；不能把已知多账号日常自行缩为单账号。以下是调用业务入口的前提，不是可由失败重试代替的推荐步骤：
+收到执行日常请求时，先确认已有任务范围、账号列表与顺序；有[本机账号配置清单](references/multi-account.md#本机账号配置清单)时先解析，逐账号核对实际配置，不从 A/B 别名猜映射；不能把已知多账号日常自行缩为单账号。以下是调用业务入口的前提，不是可由失败重试代替的推荐步骤：
 
 1. **准备环境。** 确认当前模拟器实例、窗口可见性、Android 就绪及无并发操作者；未启动时，在当前授权覆盖范围内启动并等待就绪，缺少必要授权才询问。按当前实例发现端口并验证目标 ADB/profile，不以历史连接成功代替。Windows 细节见 [MuMu 参考](references/mumu-windows.md)。
 2. **核验目标账号。** 多账号逐个按[官方 startup 与身份核验](references/multi-account.md#执行门禁)执行；先确认本轮目标身份，再进入其业务。单账号也须有可信当前身份，不能把报告别名当作登录证明。
@@ -32,7 +32,7 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 - 临期药只配置“用／不用”，统一通过 `drain_sanity.py run --policy` 执行，两模式都收尾检测提醒。策略、固定倍率用药后无药补尾及迁移方法见 [references/expiring-medicine.md](references/expiring-medicine.md)；完整库存清空仍不能保证。
 - 安装、版本、目录或部分安装判断：读取 [references/install-and-discovery.md](references/install-and-discovery.md)。
 - task、profile、variants、已有文件保护或 dry-run：读取 [references/native-config.md](references/native-config.md)。
-- 单设备切号、多个已登录账号依次复用同一 task：读取 [references/multi-account.md](references/multi-account.md)。
+- 单设备切号、账号配置持久映射、共用或不同配置的多账号运行：读取 [references/multi-account.md](references/multi-account.md)。
 - Windows MuMu、模拟器自带 ADB、实例与端口：读取 [references/mumu-windows.md](references/mumu-windows.md)。
 - Custom 任务、用户资源、局部状态恢复或严格白名单购买：读取 [references/custom-tasks.md](references/custom-tasks.md)。
 - 授权、资源风险、长任务等待和结果分类：读取 [references/safety-and-results.md](references/safety-and-results.md)。执行边界异常或升级后复核旧报告，使用该页的 `run_with_evidence.py --inspect-report` 只读入口，不按错误名称归因或先重跑游戏。
@@ -45,11 +45,11 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 1. **判断用户意图。** 区分只读检查、首次配置、修改日常、dry-run、单账号执行和单设备多账号依次执行。只追问会改变 task 内容、账号或设备目标、执行顺序或资源风险的信息。
 2. **发现当前环境。** 先使用当前 `maa --help`、`maa version` 和 `maa dir`。命令不在 PATH 时再检查官方默认位置或模拟器目录。分别判断 CLI、MaaCore、配置、profile、ADB、模拟器实例和设备连接，不把部分安装笼统报成“没装”。默认或既有偏好是前台可见时，把桌面模拟器 shell 与可恢复顶层窗口作为真实运行门禁；只有虚拟机后端和 ADB 不算“模拟器已经正常打开”，只有窗口而管理器仍报告 Android 未启动或非零启动错误也不算成功。只有用户本次明确选择后台或隐藏运行时才跳过可见窗口门禁。恢复窗口需要关闭已有实例时，先说明会终止其中游戏并取得对应授权。模拟器发生关闭、重启或实例恢复后，重新从当前管理器/实例证据发现 ADB 端口并校验 profile，不沿用重启前地址。
 3. **通过 baseline 门禁。** 读取现有 profile/task；创建正式日常前按[创建指南](references/create-task.md)选定并说明基线、继承项和变更项。优先成熟本地 task，其次完整参考模板；低风险模板不能代替完整日常基线。未完成基线核查不得写入正式 task，不强制改名或迁移用户已有入口。
-4. **形成个性化 task。** 用 maa-cli 原生 TOML、YAML 或 JSON 表达用户选择。考虑真实起始界面：如果运行可能从客户端未启动、登录页或黄色 `START` 页开始，在业务任务前配置当前版本支持的 `StartUp`；只有能证明已在可识别主界面时才可省略。按星期选择关卡时必须显式判断使用本地自然日还是服务器游戏日；存在凌晨换日差异时使用当前版本支持的游戏服务器时区，并从 verbose dry-run 核对最终关卡。多账号请求只使用已登录且能由唯一 `account_name` 区分的账号；切号使用 maa-cli 官方预定义命令 `maa startup <client> --account-name <name>`，共享业务 task 不再包含第二个无账号目标的 `StartUp`。用户明确要求从本机现有日志发现账号时，先按多账号参考执行 `maa dir log` 和限定范围的日志检索；只有日志仍不能唯一辨认账号时才询问用户，不得未经检查就断言命令行无法发现。具体隔离方式见多账号参考。默认不使用源石；不要猜测当前版本不确定的参数名或枚举值，必要时核对当前官方文档和命令帮助。
+4. **形成个性化 task。** 用 maa-cli 原生 TOML、YAML 或 JSON 表达用户选择。考虑真实起始界面：如果运行可能从客户端未启动、登录页或黄色 `START` 页开始，在业务任务前配置当前版本支持的 `StartUp`；只有能证明已在可识别主界面时才可省略。按星期选择关卡时必须显式判断使用本地自然日还是服务器游戏日；存在凌晨换日差异时使用当前版本支持的游戏服务器时区，并从 verbose dry-run 核对最终关卡。多账号请求只使用已登录且能由唯一 `account_name` 区分的账号；切号使用 maa-cli 官方预定义命令 `maa startup <client> --account-name <name>`，对应业务 task 不再包含第二个无账号目标的 `StartUp`。用户明确要求从本机现有日志发现账号时，先按多账号参考执行 `maa dir log` 和限定范围的日志检索；只有日志仍不能唯一辨认账号时才询问用户，不得未经检查就断言命令行无法发现。具体隔离方式见多账号参考。默认不使用源石；不要猜测当前版本不确定的参数名或枚举值，必要时核对当前官方文档和命令帮助。
 5. **保护真实配置。** 新 task 直接属于 maa-cli 原生 `tasks` 目录。修改已有文件前展示影响并保留可恢复副本；只操作精确目标，不改无关配置。
 6. **通过执行前业务对账门禁。** 当前版本支持且验证有意义时，先用 `maa list` 确认发现，再用 `maa run <task> --dry-run --batch --profile <profile>` 检查解析。真实运行前重新读取最终持久化文件，把每项用户需求映射为 `configured`、`orchestrated`、`manual`、`unsupported`、`unverified` 或 `missing`，并记录其实现载体与验证证据；静态 task 无法表达的运行时分支必须归入明确的 Agent/runner 编排或能力缺口，不能写成已经配置。存在 `missing` 时停止真实运行；会改变资源的 `unverified` 项默认也停止，只有用户当前明确要求验证列出的具体项目，且目标账号与设备、参数、资源影响上限和停止条件都已确定时，才可把本次执行限定为一次有界验证运行。执行前说明验证项和影响，排除未获授权的其它 `unverified` 分支；本次授权不得外推到普通日常或未来运行。当前日期的 dry-run 只验证当前装配分支，不能证明整周条件、任务顺序、设备或所有 MaaCore 参数正确；完整方法见原生配置参考。maa-cli 可能在解析或连接 MaaCore 前执行资源热更新；若只停在 `Updating hot update files...` 且本次没有新的 MaaCore 日志，应判为 CLI 更新网络失败，不得写成配置、ADB 或切号失败。先保持真实执行门禁，再做一次有界重试；同因复现时停止并诊断更新源。
 7. **补足必要授权。** 用户已明确要求运行一个已知日常时不要重复机械确认。首次安装、更新、实质修改配置、设备目标不唯一或存在源石等显著资源风险时，先说明影响并取得相应同意。
-8. **执行一次。** 单账号使用当前版本实际支持的命令运行一次 task。当前宿主能运行 Python 时，每个真实 `maa startup` / `maa run` 进程都使用 [scripts/run_with_evidence.py](scripts/run_with_evidence.py) 单独包裹，以保留进程退出状态和本次 MaaCore 日志边界；宿主确实不能运行脚本时才直接执行，并把证据能力降级写入结果。runner 的命令、退出码和报告语义见安全参考。多账号属于同一次用户请求，但必须按固定顺序为每个账号先运行 `maa startup <client> --account-name <唯一登录名>`；该进程成功退出只是必要条件，还要检查本次日志中是否出现登录过期、重新认证、回退到最近账号等反证，账号身份可信后才用新的 `maa run` 执行共享业务 task。不要把多个账号塞进同一个 MaaCore 运行队列，也不要用自定义切号 helper、虚构的未匹配账号或视觉点击代替官方切号命令。任一账号切换失败、身份不确定、业务任务失败或遗留状态无法安全恢复时停止后续账号，不猜测性继续。真实 `maa` 进程应运行在能访问目标 profile、资源、必要时的更新网络、ADB 以及必要桌面会话的执行上下文中；另一个上下文里的只读 ADB 成功不能替代这一门禁。若命令持续无输出且本次 MaaCore 日志没有新增，按安全参考先判为尚未进入 MaaCore，不猜切号状态或重复启动。让普通非交互命令保持 pending 直到退出、超时、取消或运行时失联；不要用高频 Agent/LLM 轮询观察长任务，也不要因暂时零输出重复启动同一任务。Agent 启动了模拟器时，按用户选择在任务后保持可见、恢复可见或正常关闭，并报告实际生命周期；不要遗留一个无窗口但会拦截后续启动的隐藏实例。
+8. **执行一次。** 单账号使用当前版本实际支持的命令运行一次 task。当前宿主能运行 Python 时，每个真实 `maa startup` / `maa run` 进程都使用 [scripts/run_with_evidence.py](scripts/run_with_evidence.py) 单独包裹，以保留进程退出状态和本次 MaaCore 日志边界；宿主确实不能运行脚本时才直接执行，并把证据能力降级写入结果。runner 的命令、退出码和报告语义见安全参考。多账号属于同一次用户请求，但必须按固定顺序为每个账号先运行 `maa startup <client> --account-name <唯一登录名>`；该进程成功退出只是必要条件，还要检查本次日志中是否出现登录过期、重新认证、回退到最近账号等反证，账号身份可信后才以该账号对应配置运行独立业务进程。不要把多个账号塞进同一个 MaaCore 运行队列，也不要用自定义切号 helper、虚构的未匹配账号或视觉点击代替官方切号命令。任一账号切换失败、身份不确定、业务任务失败或遗留状态无法安全恢复时停止后续账号，不猜测性继续。真实 `maa` 进程应运行在能访问目标 profile、资源、必要时的更新网络、ADB 以及必要桌面会话的执行上下文中；另一个上下文里的只读 ADB 成功不能替代这一门禁。若命令持续无输出且本次 MaaCore 日志没有新增，按安全参考先判为尚未进入 MaaCore，不猜切号状态或重复启动。让普通非交互命令保持 pending 直到退出、超时、取消或运行时失联；不要用高频 Agent/LLM 轮询观察长任务，也不要因暂时零输出重复启动同一任务。Agent 启动了模拟器时，按用户选择在任务后保持可见、恢复可见或正常关闭，并报告实际生命周期；不要遗留一个无窗口但会拦截后续启动的隐藏实例。
 9. **通过汇报闭环门禁。** 最后一次修改或临时补尾后重新读取正式持久化入口，结合退出码、summary、stderr 和日志逐项回填执行前业务对账；区分“本次运行实际完成”与“以后重复调用正式入口能够完成”。临时 task、人工补偿或单次 Agent 编排的成功不能证明另一个正式 task 已包含同样能力。最终说明下次应调用的准确 task 或进程顺序，并把没有持久化、没有验证或需要人工处理的部分保留为对应状态；任一用户要求仍未闭环时不得概括成“正式日常已定稿”或“全部完成”。多账号逐账号报告切换、任务与业务后置条件，不把一部分账号完成概括成全部完成。`Completed` 只说明配置中的任务链结束：`StartUp Completed` 不证明目标账号身份，`Recruit Completed` 不证明受保护的高星槽位已经开招，`Infrast Completed` 不证明未配置的基建入口已处理，`Fight Completed` 也不证明实际开战过；核对 `FightTimes.times_finished`、当前理智、倍率总消耗和资源动作。基建收取、队列轮换/整理和逐设施处理是相互独立的业务结果；预期收取时必须在本轮日志边界内核对实际 `InfrastReward` 动作。若通知入口后没有任何收取动作便直接退出，不能据此断言“没有可收取内容”，应按安全参考保留为未核验或疑似跳过，并用游戏侧后置条件复核。零战斗仍可能已经消耗临期药，资源结果与战斗结果必须分开核验。涉及购买、领取、招募、基建轮换或资源消耗时补充日志或游戏侧证据。记录必要日志路径，但不要把用户日志、账号标识或设备信息写入 Skill 仓库。
 
 执行状态、内部异常和业务结果分别判断，详见[结果分层与继续门槛](references/safety-and-results.md#执行状态内部异常与业务结果分层)。runner 零退出码不代表业务通过，内部 `SubTaskError` 也不自动代表整轮失败；下一阶段必须核验自身依赖的账号、界面、资源及业务前置，不能由 Agent 按节点名称忽略错误。

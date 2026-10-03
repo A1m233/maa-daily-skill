@@ -1,6 +1,6 @@
 # maa-daily-skill
 
-一个指导 Agent 使用 [MaaAssistantArknights](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 的 `maa-cli` 配置并运行一次个性化明日方舟日常的 Skill，支持单账号，也支持在一个已确认设备上按固定顺序为多个已登录账号复用同一套 task。
+一个指导 Agent 使用 [MaaAssistantArknights](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 的 `maa-cli` 配置并运行一次个性化明日方舟日常的 Skill，支持单账号，也支持在一个已确认设备上按固定顺序为多个已登录账号运行共用或各自指定的日常配置。
 
 它不捆绑 MAA、maa-cli、MaaCore、ADB 或模拟器，也不提供定时和无人值守能力。使用者保留自己的 profile、task、设备信息和运行日志。
 
@@ -47,6 +47,8 @@
 在 default profile 上，把同一套 daily-main 依次给账号 A 和账号 B 各跑一次；两个账号都已登录，不使用源石。
 ```
 
+账号需要不同关卡、用药策略或业务参数时，按[本机账号配置清单](./maa-daily/references/multi-account.md#本机账号配置清单)保存对应关系；相同的原生 task 仍可复用。清单解析与配置隔离已通过离线测试，双账号不同关卡已完成无药战斗及奖励收尾的有界实测；未覆盖的差异组合见该页验收记录。
+
 Skill 会把当前环境证据放在预设示例之前：先读取当前 `--help`、版本、`maa dir`、已有配置和设备状态，再决定哪些指导仍适用。
 
 ## 已验证参考
@@ -86,7 +88,7 @@ Skill 会把当前环境证据放在预设示例之前：先读取当前 `--help
 - 不把 PATH 中缺少 `maa` 或 `adb` 当成软件不存在。
 - 不为了只读问题启动模拟器、连接设备或运行任务。
 - 不处理定时、无人值守、长期后台或多设备编排。
-- 多账号仅支持单设备、固定账号列表和一次性显式请求；每个账号先用官方 `maa startup --account-name` 切换，成功退出后再用新的 `maa run` 执行共享业务 task，不使用视觉点击或自定义切号 helper，也不形成未来批次的持久授权。
+- 多账号仅支持单设备、固定账号列表和一次性显式请求；每个账号先用官方 `maa startup --account-name` 切换，核验身份后再以对应配置运行独立业务进程（支持共用配置或本机账号清单指定的差异配置），不使用视觉点击或自定义切号 helper，也不形成未来批次的持久授权。
 
 任何会下载组件、改变用户配置或操作真实游戏的行为，仍服从用户所用 Agent 的审批与命令治理能力。
 

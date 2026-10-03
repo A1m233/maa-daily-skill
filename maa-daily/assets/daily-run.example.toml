@@ -1,5 +1,7 @@
 # 单账号日常执行器配置，放在 MAA config/policies/，不要放 tasks/。
 # 仅引用已按用户偏好配置的原生任务；账号切换仍由官方 startup 完成。
+# 多账号可共用本文件或各自引用一份；用 accounts.example.toml 保存映射。
+# 各份配置可共享无差异的 task，仅修改有差异的引用/预算；不做字段继承。
 version = 1
 pre_tasks = ["daily-biz"]
 stage_task = "daily-stage"

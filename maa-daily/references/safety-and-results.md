@@ -81,11 +81,11 @@ runner 使用待执行命令的同一个 `maa` 可执行文件调用 `maa dir lo
 - 本次新增日志的起止行、日志是否缺失、未变化或发生轮换；
 - 本次新增日志字节区间的 SHA-256，供后续检查组件拒绝已被替换的证据区间；
 - `TaskChainStart`、`TaskChainCompleted`、`TaskChainError`、`SubTaskError` 的次数和行号；
-- MaaCore `ERR` / `CRT` 行号，以及 `SubTaskExtraInfo.what` 的类型计数；原始 `subtask_error_lines` 完整保留。`evidence.execution` 单独输出任务链执行状态及边界问题，不按内部节点名称过滤错误。
+- MaaCore `ERR` / `CRT` 行号，以及 `SubTaskExtraInfo.what` 的类型计数；原始 `subtask_error_lines` 完整保留。`evidence.execution` 单独输出任务链执行状态及边界问题，不按内部节点名称过滤错误；`evidence.diagnostics.client_update` 提供下文的客户端更新诊断，不改变执行结论。
 
 runner 不保存完整命令参数或完整日志副本，`business_result` 固定为 `not_evaluated`。这意味着 runner 的零退出码仍不证明账号、购买、领取、招募、基建或资源消耗等后置条件成立；Agent 必须按报告给出的本轮日志范围继续核对相关业务证据。
 
-报告 schema 2 采用 `execution-boundary-v2`：子进程非零时保留其退出码；子进程为零但日志不可界定、回调无法解析、任务链身份/生命周期有歧义、没有任务链或缺少终态时返回 `74`；出现 `TaskChainError`、`TaskChainStopped`、`InternalError` 或 `InitFailed` 时返回 `75`。仅有 `SubTaskError` 或内部 ERR/CRT 不会自动改写完整的任务链执行结果，但全部保留用于业务核验。零退出码只代表执行边界完整，绝不代表业务通过。任一非零结果都停止后续真实进程；宿主显示笼统失败时读取 `wrapper_exit_code`。报告只写本地临时或调试目录，不写入 Skill 仓库。
+报告 schema 2 采用 `execution-boundary-v2`：子进程非零时保留其退出码；子进程为零但日志不可界定、回调无法解析、任务链身份/生命周期有歧义、没有任务链或缺少终态时返回 `74`；出现 `TaskChainError`、`TaskChainStopped`、`InternalError` 或 `InitFailed` 时返回 `75`。仅有 `SubTaskError` 或内部 ERR/CRT 不会自动改写完整的任务链执行结果，但全部保留用于业务核验。零退出码只代表执行边界完整，绝不代表业务通过。任一非零结果都停止后续 startup 和业务进程；仅可按[客户端更新检查](#客户端更新检查)的条件进入一次无点击诊断，不据此继续业务。宿主显示笼统失败时读取 `wrapper_exit_code`。报告只写本地临时或调试目录，不写入 Skill 仓库。
 
 子任务回调的 `taskid` 不一定等于主链 ID。[MaaCore v6.17.1 StartUpTask](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Task/Interface/StartUpTask.cpp) 独立创建并运行内部任务；[AbstractTask](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Task/AbstractTask.h) 的默认 ID 为 0，常规 [PackageTask](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Task/PackageTask.cpp) 才向其子任务集合传播 ID。v2 保持主链开始/终态的 ID 精确匹配；对未匹配的 `SubTaskError(taskid=0)`，仅在进程、线程、设备 UUID 和链名一致且存在唯一活动正 ID 主链时归属。缺上下文、候选不唯一、不同非零 ID 或链外事件仍为 unknown，不按任务/节点名称放行。`execution.subtask_error_attributions` 保留原 ID、归属主链 ID、行号和依据；原始错误不删除，也不证明其无害。2026-09-24 已用已有 StartUp 日志只读回放验证，不是新的游戏运行验收。
 
@@ -97,7 +97,7 @@ runner 不保存完整命令参数或完整日志副本，`business_result` 固�
 python <skill-root>/scripts/run_with_evidence.py --inspect-report <原runner报告.json>
 ```
 
-入口只读取 schema 1/2 报告指定的日志字节区间并校验哈希（单区间上限 64 MiB），不调用 MAA、不写文件，拒绝与运行命令、`--core-log` 或 `--report-file` 混用。输出普通 JSON，保留 `original_wrapper_exit_code`，给出 `reassessed_wrapper_exit_code`、新版执行判断及全部子任务错误/内部错误行号；成功复核的进程退出码采用重新评估值，证据无效则返回 74。原报告不改写，日志尾部正常追加不影响原区间；原区间被覆盖或无法读取时保持 unknown。
+入口只读取 schema 1/2 报告指定的日志字节区间并校验哈希（单区间上限 64 MiB），不调用 MAA、不写文件，拒绝与运行命令、`--core-log` 或 `--report-file` 混用。输出普通 JSON，保留 `original_wrapper_exit_code`，给出 `reassessed_wrapper_exit_code`、新版执行判断及全部子任务错误/内部错误行号，并在 `diagnostics.client_update` 提供客户端更新诊断；成功复核的进程退出码采用重新评估值，证据无效则返回 74。原报告不改写，日志尾部正常追加不影响原区间；原区间被覆盖或无法读取时保持 unknown。
 
 复核结果为 completed 只撤销执行边界的疑点，`business_result` 仍为 not_evaluated；它不消除真实重试，不核验目标账号，也不替换下游业务组件对原报告的严格检查。`continuation=requires_business_preconditions` 不是续跑许可。需要继续时先按[账号核验](multi-account.md#执行门禁)及当前设备、游戏日、界面与资源前置重新判断，不编辑原报告退出码来绕过组件门禁。
 
@@ -110,6 +110,40 @@ MAA 的 [AbstractTask](https://github.com/MaaAssistantArknights/MaaAssistantArkn
 `infrast_check.py inspect --report <原前段报告>` 校验日志字节区间与哈希后重新判断执行状态。只有 schema 1 的旧 `75`、子进程零退出、无 runner 异常，且原日志含子任务错误但执行边界完整时，才返回 `legacy_exit_reclassified=true`；这只撤销旧的执行阻断，不表示错误已消歧或业务成功。保留 `original_wrapper_exit_code` 和全部诊断，不修改原报告；schema 2 的非零结果、非零子进程或损坏证据不这样重分类。
 
 **是否继续的门槛：** 执行失败/未知、账号不可信、在途战斗未明、起点不能安全恢复、资源预算不明、下一步依赖的业务前置未满足时停止。若执行完整、下一步的独立安全前置已核实，且缺口不是用户规定必须先完成的事项，可以在已有授权内继续不依赖该缺口的阶段，同时保留未完成/未知并提醒；例如不能只因会客室内部告警取消所有后续刷图，也不能在剿灭优先目标未闭环时直接消耗普通关卡理智。检查器输出 `continuation=requires_business_preconditions` 不是自动放行；不自动重跑、补偿或把部分完成报成全完成。跨账号仍服从原失败隔离要求。
+
+## 客户端更新检查
+
+本节拥有客户端更新提示的检查、停止与恢复规则。它属于 Agent 的启动外层流程，不并入单账号业务执行器，也不替代官方 `startup` 或账号核验。
+
+设备/profile 已就绪且没有并发操作者后，在本批首个 startup 前执行一次；单账号 task 内含 `StartUp` 时，在运行该 task 前执行：
+
+```text
+python <skill-root>/scripts/client_check.py scan --maa <本次maa可执行文件> --profile <profile>
+```
+
+`scan` 校验既有 `maa-daily-check-screen.toml` 和 `MaaDailyCheck@ScreenText` 资源与捆绑版本一致，经 dry-run 后用薄 runner 执行一次 DoNothing OCR，并以 `--no-auto-reconnect` 关闭该次 MAA 自动重连。它只读取当前页面，不点击、不导航、不启动游戏、不切号；不会为显示更新提示先启动客户端。该入口复用已有资源，不需要新增节点；部署缺失或冲突时按[组件部署](daily-checks.md#复用入口)处理，不能用更新 Skill 代替 `prepare`。实际扫描显式启用用户资源，不修改 profile；资源检查或 dry-run 通过均不证明 OCR 通过。
+
+需要解释已有 startup 失败时，优先读取 runner 的 `evidence.diagnostics.client_update`，或只读复核原报告：
+
+```text
+python <skill-root>/scripts/client_check.py inspect --report <原runner报告.json>
+```
+
+`inspect` 读取并校验原日志区间哈希，原报告非零退出也可诊断；不调用 MAA、不写文件、不改原执行结论。`observed_at` 保留原报告 `ended_at`，不把旧提示称为当前状态。证据缺失、区间变化或边界不明确时保持 unknown，不扫描整个历史日志补结论。
+
+| 状态 / 退出码 | 含义与下一步 |
+| --- | --- |
+| `client_update_required` / 3 | 已有明确客户端更新提示，暂停整批后续 startup、切号和业务；提醒用户更新客户端。 |
+| `not_detected` / 0 | 本次未识别到明确提示，只允许按已有门禁进入原定官方启动流程；不证明无需更新、账号正确或业务可执行，也不能撤销之前的执行失败。 |
+| `unknown` 或 `observed` / 2 | 无法确认，或仅有历史提示；启动前 scan 未知时暂停启动，不自动重试。复核报告保留原执行与身份结论；已有成功启动链中的历史提示只记为 observed，不能据此倒置为当前更新阻塞。 |
+
+分类只采用支持范围内完整、高置信的中文更新文案及其所在执行轮次；`GameOffline`、`OfflineConfirm`、网络错误名称或零散“更新”字样不证明需要更新。runner 的诊断字段不自动改变退出码、账号或业务结果。
+
+startup 失败且既有证据已明确更新时，直接暂停，不再扫描或重跑。证据不足时，只有原进程已确认终态、设备连接正常且无并发者，才可追加至多一次上述无点击扫描；仍未知即报告未知。连接异常先回环境核验，不盲扫、不用业务任务探测。这个补充诊断不解除失败后的继续门禁。
+
+客户端冷启动后才出现的更新提示可能未被启动前扫描发现；本组件不实时监控、不强杀原进程。官方 startup 内部仍在重试时按长命令规则等待终态，再使用其既有报告诊断。用户完成更新后，重新核验设备、profile、客户端检查和目标账号后才能恢复；不自动下载安装客户端，也不另造切号流程。保留已完成账号的结果，尚未运行的账号记为未开始，简报按[外层事实](daily-summary.md#默认呈现)补充。
+
+2026-10-10 在 maa-cli 0.7.5 / MaaCore 6.17.1 / Windows MuMu 当前客户端更新弹窗上完成无点击实测：独立 Custom OCR 链正常结束，完整文案置信度 0.963096，检查器返回 `client_update_required` / 退出码 3。该进程只有 ScreenText 的 DoNothing，无 startup、游戏重启、切号或资源动作；未更新客户端。先前失败 startup 的原区间哈希回放也识别到六次提示，同时保留执行失败和原退出码。离线反例覆盖普通离线、资源下载、低分、跨进程/线程、区间篡改，以及早期提示后成功或新尝试；尚未实测更新后的正常页面或其它语言客户端，不宣称识别全部更新文案。
 
 ## 等待长命令
 

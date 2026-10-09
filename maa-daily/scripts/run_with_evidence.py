@@ -18,6 +18,7 @@ from typing import Any, Sequence
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from client_check import classify_client_update
 
 REPORT_PREFIX = "MAA_EVIDENCE_JSON="
 EVIDENCE_UNAVAILABLE_EXIT = 74
@@ -157,6 +158,7 @@ def inspect_execution_report(report: dict) -> dict:
                   subtask_error_lines=parsed["subtask_error_lines"],
                   internal_error_lines=parsed["internal_error_lines"],
                   callback_parse_error_lines=parsed["callback_parse_error_lines"],
+                  diagnostics=parsed["diagnostics"],
                   continuation="requires_business_preconditions" if code == 0 else "blocked_execution")
     return result
 
@@ -295,8 +297,10 @@ def _parse_callbacks(appended: bytes, start_line: int) -> dict[str, Any]:
             if isinstance(what, str) and what:
                 extra_info_types[what] += 1
 
+    execution = classify_execution(text.splitlines(), start_line)
     return {
-        "execution": classify_execution(text.splitlines(), start_line),
+        "execution": execution,
+        "diagnostics": {"client_update": classify_client_update(text.splitlines(), start_line, execution)},
         "level_counts": dict(sorted(level_counts.items())),
         "internal_error_lines": internal_error_lines,
         "callback_counts": dict(sorted(callback_counts.items())),
@@ -531,4 +535,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # 管道中的中文诊断与 JSON 文件采用同一 UTF-8 契约，不依赖 Windows 代码页。
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     raise SystemExit(main())

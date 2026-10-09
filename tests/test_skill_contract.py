@@ -18,6 +18,7 @@ class SkillContractTests(unittest.TestCase):
             "SKILL.md",
             "agents/openai.yaml",
             "scripts/run_with_evidence.py",
+            "scripts/client_check.py",
             "scripts/daily_checks.py",
             "scripts/reward_check.py",
             "scripts/infrast_check.py",

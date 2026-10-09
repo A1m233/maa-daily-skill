@@ -9,7 +9,7 @@
 ## 默认行为
 
 - 产物库位于本次实际 MAA 配置目录的 `maa-daily-artifacts/`，不是 Skill 安装目录。
-- `daily_run.py`、`drain_sanity.py`、`medicine_sanity.py check`、`reward_check.py scan` 默认在库内创建唯一运行子目录；`--output-dir` 可指定其他父目录，新子目录仍登记在同一产物库并计入容量。
+- `daily_run.py`、`drain_sanity.py`、`medicine_sanity.py check`、`reward_check.py scan` 和 `client_check.py scan` 默认在库内创建唯一运行子目录；`--output-dir` 可指定其他父目录，新子目录仍登记在同一产物库并计入容量。客户端检查使用 `client-check-*` 包保留 `evidence.json` 与 `result.json`；`client_check.py inspect` 只读既有报告，不创建运行包。
 - 日常内调用的清体力、奖励扫描及薄 runner 共用顶层运行归属，不重复计数，也不互相清理尚在使用的子报告。独立调用则拥有独立运行包。
 - `run_with_evidence.py` 默认将 `evidence.json` 写入受管运行目录，以 `MAA_EVIDENCE_REPORT=` 输出报告路径。显式 `--report-file` 仍可指定新文件；包外文件只登记该文件，不接管父目录，不覆盖已有文件。需要长期自行保留的材料应另行导出，不依赖运行缓存。
 - `daily_report.py` 默认仅输出到终端，不产生新文件。需要落盘时，`--output-dir` 是父目录，每次建立 `brief-*` 子目录，实际路径写入 stderr；原报告不改写。

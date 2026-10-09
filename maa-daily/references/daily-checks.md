@@ -27,7 +27,7 @@ python <skill-root>/scripts/daily_checks.py inspect --report <local>/sanity.json
 
 - `maa-daily-check-sanity`：起点必须是目标关卡准备页。确认“开始行动”区域后两次 OCR 理智，仅在高置信且一致时输出读数，绝不点击开战。它暂不承载从主页自动选关。
 - `maa-daily-check-rewards`：旧的单页 OCR 诊断入口，不承担档位计数；完整收尾改用下文的 `reward_check.py scan`。
-- `maa-daily-check-screen`：仅 OCR 当前页面，供未知起点诊断，不点击、不导航，不从通用 OCR 直接确认理智或奖励状态。
+- `maa-daily-check-screen`：仅 OCR 当前页面，供未知起点诊断，不点击、不导航，不从通用 OCR 直接确认理智或奖励状态。客户端更新提示使用[专用检查入口](safety-and-results.md#客户端更新检查) `client_check.py scan`，它校验并复用这个 task 和既有 `ScreenText` 资源；已有一致部署无需新增资源，缺失时仍需 `prepare`。
 - `inspect`：仅读取该 runner 报告的日志字节区间，并校验区间哈希。错误、日志变化、缺少识别结果均不能当作零理智或奖励已领取。报告只放本地，不提交账号页面 OCR。
 
 `daily_checks.py inspect` 只提取单次 OCR/理智，其奖励字段仍为 unknown。不要把这个低层入口当成奖励检查结果；档位计数与提醒使用下面的专用脚本。`AwardFinished` 或 `ReceiveAward` 仍不足以单独证明关键奖励已领取。

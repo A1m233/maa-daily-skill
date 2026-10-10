@@ -1,8 +1,10 @@
 import hashlib
 import importlib.util
 import json
+import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 import contextlib
 import io
 from pathlib import Path
@@ -65,6 +67,41 @@ class DailyChecksTests(unittest.TestCase):
                 checks.prepare(root)
             self.assertFalse((root / "resource").exists())
             self.assertEqual("user task", task.read_text(encoding="utf-8"))
+
+    def test_prepare_accepts_line_endings_without_rewriting_existing_files(self):
+        for packaged_eol in (b"\n", b"\r\n"):
+            for deployed_eol in (b"\n", b"\r\n"):
+                with self.subTest(packaged=packaged_eol, deployed=deployed_eol), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    skill, config = root / "skill", root / "config"
+                    shutil.copytree(ROOT / "maa-daily/assets", skill / "assets")
+                    config.mkdir()
+                    for task in (skill / "assets/daily-checks").glob("*.toml"):
+                        task.write_bytes(task.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", packaged_eol))
+                    with patch.object(checks, "__file__", str(skill / "scripts/daily_checks.py")):
+                        checks.prepare(config)
+                        for task in (config / "tasks").glob("*.toml"):
+                            task.write_bytes(task.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", deployed_eol))
+                        before = {p.relative_to(config): (p.read_bytes(), p.stat().st_mtime_ns)
+                                  for p in config.rglob("*") if p.is_file()}
+                        self.assertEqual([], checks.prepare(config))
+                        self.assertEqual(before, {p.relative_to(config): (p.read_bytes(), p.stat().st_mtime_ns)
+                                                  for p in config.rglob("*") if p.is_file()})
+
+    def test_newline_tolerance_does_not_hide_task_conflicts_or_partial_writes(self):
+        original = (ROOT / "maa-daily/assets/daily-checks/maa-daily-reward-scan.toml").read_bytes().replace(b"\r\n", b"\n")
+        for changed in (original.replace(b"Custom", b"Fight"), original + b"# user change\n",
+                        original.replace(b"\n", b"\r"), b"\xef\xbb\xbf" + original):
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                task = root / "tasks/maa-daily-reward-scan.toml"
+                task.parent.mkdir()
+                task.write_bytes(changed.replace(b"\n", b"\r\n"))
+                before = task.read_bytes()
+                with self.assertRaisesRegex(ValueError, "task conflict"):
+                    checks.prepare(root)
+                self.assertEqual([task], [p for p in root.rglob("*") if p.is_file()])
+                self.assertEqual(before, task.read_bytes())
 
     def test_alternate_task_format_is_not_shadowed(self):
         with tempfile.TemporaryDirectory() as directory:

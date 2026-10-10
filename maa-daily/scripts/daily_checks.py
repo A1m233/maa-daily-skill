@@ -144,7 +144,9 @@ def prepare(config: Path) -> list[str]:
             if dest.with_suffix(suffix).exists():
                 raise ValueError(f"alternate task format conflicts: {dest.with_suffix(suffix).name}")
         content = (assets / name).read_bytes()
-        if dest.exists() and dest.read_bytes() != content:
+        # Git/安装包可能使用不同换行；只忽略 CRLF/LF 差异，不覆盖已有文件。
+        if (dest.exists()
+                and dest.read_bytes().replace(b"\r\n", b"\n") != content.replace(b"\r\n", b"\n")):
             raise ValueError(f"task conflict: {dest.name}")
         if not dest.exists():
             writes[dest] = content

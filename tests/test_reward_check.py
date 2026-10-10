@@ -30,6 +30,10 @@ def pages_for(count):
 
 
 class RewardCheckTests(unittest.TestCase):
+    def setUp(self):
+        from fake_cli import dry
+        self.enterContext(patch("run_with_evidence.run_dry", side_effect=dry))
+
     def page_report(self, directory, mutate=lambda p: None):
         from test_drain_sanity import DrainTests, event
         rows = [{"text": "t24/日常任务", "rect": [502, 10, 142, 43], "score": 0.845},

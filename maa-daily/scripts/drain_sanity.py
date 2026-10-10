@@ -17,6 +17,7 @@ import uuid
 from daily_checks import inspect_report, plan, stage_cost
 from medicine_policy import load_policy, validate_policy, recovery_task, inspect_recovery
 from stage_runtime import VERIFY, normalize_stage, probe_task, isolated_config, STOP_NODES
+from run_with_evidence import run_dry
 
 STAGES = {"AP-5": "VerifyAP5", "CE-6": "VerifyCE6", "LS-6": "VerifyLS6"}  # 只用于旧报告兼容，不限制新入口。
 PREFIX = "MaaDailyCheck@"
@@ -125,6 +126,12 @@ class FightUnverified(ValueError):
         self.observation = fight_observation(report)
 
 
+class ProcessUnverified(ValueError):
+    def __init__(self, reason, report):
+        super().__init__(reason)
+        self.report = report
+
+
 def preserve_failed_fight(result, error):
     if isinstance(error, FightUnverified) and result["phases"]:
         result["phases"][-1]["battle_observation"] = error.observation
@@ -185,8 +192,13 @@ def valid_ocr(match: dict, text: str, minimum: float, roi: tuple) -> bool:
     return w > 0 and h > 0 and left <= x and top <= y and x+w <= left+width and y+h <= top+height
 
 
-def read_probe(report: dict, stage: str) -> int:
+def read_probe(report: dict, stage: str, *, medicine_entry: str | None = None) -> int:
     events = callbacks(report)
+    if medicine_entry is not None:
+        # 调用方已核验封闭的药物扫描前缀；这里仍独立核验全部准备页读数。
+        events = [(k, v) for k, v in events if not (
+            k in {"SubTaskStart", "SubTaskCompleted"}
+            and v.get("details", {}).get("task", "").split("@")[-1].startswith("Scan"))]
     stage = normalize_stage(stage)
     # 接受旧版本报告用于回放；新运行始终生成参数化 VerifyStage。
     legacy = PREFIX + STAGES.get(stage, "VerifyStage")
@@ -201,7 +213,7 @@ def read_probe(report: dict, stage: str) -> int:
         if kind not in {"SubTaskStart", "SubTaskCompleted"}:
             continue
         detail = value.get("details", {})
-        if (value.get("first") != [entry] or value.get("taskid") != chains[0][2]
+        if (value.get("first") != [medicine_entry or entry] or value.get("taskid") != chains[0][2]
                 or value.get("taskchain") != "Custom" or detail.get("action") != "DoNothing"
                 or detail.get("algorithm") != "OcrDetect"):
             raise ValueError("unexpected_probe_action_or_origin")
@@ -219,7 +231,7 @@ def read_probe(report: dict, stage: str) -> int:
                 or not valid_ocr(match, match["text"], 0.98, (1120, 20, 160, 40))):
             raise ValueError("sanity_unverified")
     pairs = [tuple(map(int, re.findall(r"\d+", match["text"]))) for match in (first, second)]
-    reading = inspect_report(report).get("sanity")
+    reading = inspect_report(report, probe_origin=medicine_entry).get("sanity")
     if (reading is None or pairs[0] != pairs[1]
             or pairs[0] != (reading["current"], reading["maximum"])):
         raise ValueError("stage_or_sanity_unverified")
@@ -447,7 +459,16 @@ class Runtime:
         self.reports.append(record)
         write_json(self.output / "processes.json", {"processes": self.reports})
         command = [self.maa, "run", name, "--profile", self.profile, "--batch", "--user-resource"]
-        subprocess.run(command + ["--dry-run"], check=True, env=env)
+        dry_report = self.output / (name + "-dry-run.json")
+        record["dry_run_report"] = str(dry_report)
+        try:
+            run_dry(command + ["--dry-run"], owner, dry_report, env=env)
+            if dry_report.exists():
+                record["dry_run_recovery"] = json.loads(dry_report.read_text(encoding="utf-8")).get("recovery", {})
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            record.update(failed_phase="dry_run", reason=str(error))
+            write_json(self.output / "processes.json", {"processes": self.reports})
+            raise
         runner = Path(__file__).with_name("run_with_evidence.py")
         code = subprocess.run([sys.executable, "-B", str(runner), "--report-file", record["report_file"], "--", *command], env=env).returncode
         record["runner_exit_code"] = code
@@ -459,11 +480,12 @@ class Runtime:
             raise ValueError("runner_report_unavailable") from error
         record["internal_error_lines"] = report.get("evidence", {}).get("internal_error_lines", [])
         record["subtask_error_lines"] = report.get("evidence", {}).get("subtask_error_lines", [])
+        record["recovery"] = report.get("recovery", {})
         write_json(self.output / "processes.json", {"processes": self.reports})
         if code:
             if phase in {"fight", "medicine-bulk"}:
                 raise FightUnverified("runner_failed: " + str(code), report)
-            raise ValueError("runner_failed: " + str(code))
+            raise ProcessUnverified("runner_failed: " + str(code), report)
         return report
 
 
@@ -537,7 +559,10 @@ def main(argv=None) -> int:
         result["observed_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
         result["warning_report_files"] = [r["report_file"] for r in runtime.reports
                                           if r.get("internal_error_lines") or r.get("subtask_error_lines")
-                                          or r.get("runner_exit_code") or r.get("report_error")]
+                                          or r.get("runner_exit_code") or r.get("report_error")
+                                          or r.get("recovery", {}).get("retried")]
+        result["warning_report_files"].extend(r["dry_run_report"] for r in runtime.reports
+            if r.get("dry_run_recovery", {}).get("retried"))
         write_json(runtime.output / "result.json", result)
         print(json.dumps(result, ensure_ascii=False))
         settled = True

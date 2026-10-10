@@ -61,7 +61,7 @@
 
 ## 真实进程的薄 runner
 
-当前宿主能运行 Python 时，用 Skill 自带的 `scripts/run_with_evidence.py` 单独包裹每个真实 `maa startup` / `maa run` 进程。runner 不获得额外授权，也不改变 task、profile、设备或账号目标；它只在同一个执行上下文中运行原命令并收集证据边界。
+当前宿主能运行 Python 时，用 Skill 自带的 `scripts/run_with_evidence.py` 包裹每个真实 `maa startup` / `maa run` 命令。runner 不获得额外授权，也不改变 task、profile、设备或账号目标；它在同一个执行上下文中运行原命令并收集各次尝试的证据边界。只有下文“执行前网络恢复”规定的情形才会自动重试一次，不重试已进入业务的进程。
 
 ```text
 python <skill-root>/scripts/run_with_evidence.py \
@@ -83,7 +83,7 @@ runner 使用待执行命令的同一个 `maa` 可执行文件调用 `maa dir lo
 - `TaskChainStart`、`TaskChainCompleted`、`TaskChainError`、`SubTaskError` 的次数和行号；
 - MaaCore `ERR` / `CRT` 行号，以及 `SubTaskExtraInfo.what` 的类型计数；原始 `subtask_error_lines` 完整保留。`evidence.execution` 单独输出任务链执行状态及边界问题，不按内部节点名称过滤错误；`evidence.diagnostics.client_update` 提供下文的客户端更新诊断，不改变执行结论。
 
-runner 不保存完整命令参数或完整日志副本，`business_result` 固定为 `not_evaluated`。这意味着 runner 的零退出码仍不证明账号、购买、领取、招募、基建或资源消耗等后置条件成立；Agent 必须按报告给出的本轮日志范围继续核对相关业务证据。
+runner 不另存完整命令参数或 MaaCore 日志副本，`business_result` 固定为 `not_evaluated`。CLI 的 stdout/stderr 合流转发，并仅保留最多 256 KiB 尾部；其中可能包含原生诊断输出的本机信息，只存受管本地产物，不提交仓库。截断输出不能作为自动重试或选关解析依据。零退出码仍不证明账号、购买、领取、招募、基建或资源消耗等后置条件成立；Agent 必须按报告给出的本轮日志范围继续核对业务证据。
 
 报告 schema 2 采用 `execution-boundary-v2`：子进程非零时保留其退出码；子进程为零但日志不可界定、回调无法解析、任务链身份/生命周期有歧义、没有任务链或缺少终态时返回 `74`；出现 `TaskChainError`、`TaskChainStopped`、`InternalError` 或 `InitFailed` 时返回 `75`。仅有 `SubTaskError` 或内部 ERR/CRT 不会自动改写完整的任务链执行结果，但全部保留用于业务核验。零退出码只代表执行边界完整，绝不代表业务通过。任一非零结果都停止后续 startup 和业务进程；仅可按[客户端更新检查](#客户端更新检查)的条件进入一次无点击诊断，不据此继续业务。宿主显示笼统失败时读取 `wrapper_exit_code`。报告只写本地临时或调试目录，不写入 Skill 仓库。
 
@@ -184,7 +184,17 @@ startup 失败且既有证据已明确更新时，直接暂停，不再扫描或
 
 退出码、summary 和日志矛盾时采用保守结论，明确指出冲突。不要为了把结果变成“成功”而连续换端口、重跑整个日常或发出猜测性补偿操作。
 
-maa-cli 自身的热更新可能先于 MaaCore 连接。若 CLI 只输出 `Updating hot update files...` 后以网络 EOF 等错误退出，本次 MaaCore 日志没有新增、账号切换事件也不存在，应分类为“CLI 更新网络失败，业务任务未开始”，而不是切号、ADB 或游戏网络失败。保持窗口、ADB 与进程隔离门后允许一次有界重试；同一前置网络错误再次出现时停止并调查更新源，不把重试成功改写成首次没有失败。
+### 执行前网络恢复
+
+maa-cli 自身的热更新可能先于 MaaCore 连接。组件与 runner 共用窄范围判定：进程已正常非零退出、原 MaaCore 日志存在且身份/原尾部/大小保持不变、CLI 完整输出明确停在 `Updating hot update files...` 并报告 `Network error` 与 `unexpected end of file`、没有后续加载或任务装配迹象时，才记录 `failure.phase=cli_hot_update`、`game_operated=false`，原样重试当前命令一次。不以“没有新日志”单独证明没操作游戏。其它网络错误、未知输出、超时/取消、日志缺失/轮转/新增及已开始的业务都不自动重试。
+
+同一受管顶层运行通过 `cli-pre-core-retry.json` 共享一个重试额度，dry-run、真实执行和嵌套检查组件不能各自重置。启动重试前先记录额度；原环境、代理、权限和命令保持不变。`attempts` 与独立 `cli-attempt-*.json` 保留每次原始退出码、CLI 输出和日志边界，顶层结果对应最后一次尝试；`recovery` 说明是否恢复及额度是否用过。dry-run 同样落报告，解析失败不得进入真实执行。
+
+maa-cli 默认 Warn 不输出 Info 级更新起始标记；runner 仅在子进程环境未显式设置 `MAA_LOG` 时补为 `info`，不修改系统环境或用户已有日志级别。显式静默/日志重定向使必要标记不可见时，仍保守停止，不从裸 EOF 猜测安全性。
+
+2026-10-10 实机验收发现默认日志级别下的裸 EOF 被正确保守拦停，但无法进入预期的安全重试分支；按 [maa-cli v0.7.5 更新实现](https://github.com/MaaAssistantArknights/maa-cli/blob/v0.7.5/crates/maa-cli/src/installer/hot_update.rs) 补充子进程 Info 日志后，正常导航/识别路径已观察到起止标记并通过。修正后未再自然触发 EOF；一次重试、共享额度与业务已开始不重跑仍是离线故障注入验证，不声称网络问题已解决。
+
+组件返回失败后，Agent 不再叠加一次相同重试，也不通过新建运行目录重置额度。保持现有窗口、ADB、身份和并发门禁；定位并修复具体原因后才在既有授权内决定补跑范围。独立顶层调用没有跨会话重试账本，不能把其新额度当作连续重试许可。本机制不改系统代理、不自动切换宿主权限，也不跳过客户端更新阻塞。未使用组件的直接命令遵守同样的一次有界边界。
 
 ### 收尾检查依赖预检
 

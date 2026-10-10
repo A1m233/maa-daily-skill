@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Run one maa-cli process and emit a bounded MaaCore evidence report."""
+"""Run maa-cli with bounded evidence and one shared pre-Core network retry."""
 
 from __future__ import annotations
 
 import argparse
+import codecs
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
+import threading
+import uuid
 from collections import Counter
 from pathlib import Path
 from typing import Any, Sequence
@@ -39,6 +43,113 @@ KNOWN_SUBCOMMANDS = {
 LEVEL_PATTERN = re.compile(r"\]\[(TRC|DBG|INF|WRN|ERR|CRT)\]\[")
 TAIL_WINDOW = 512
 LOG_LANE = re.compile(r"\[(P[^\]]+)\]\[(T[^\]]+)\]")
+CLI_OUTPUT_LIMIT = 256 * 1024
+
+
+def _execute(command: list[str], env: dict, timeout: float | None = None) -> tuple[int, str, bool]:
+    """流式转发并只保留有界 CLI 原文，不把长战斗输出全部留在内存。"""
+    read_fd, write_fd = os.pipe()
+    output = bytearray()
+    truncated = False
+    def copy():
+        nonlocal truncated
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        with os.fdopen(read_fd, "rb") as source:
+            while chunk := source.read1(4096):
+                output.extend(chunk)
+                if len(output) > CLI_OUTPUT_LIMIT:
+                    del output[:-CLI_OUTPUT_LIMIT]
+                    truncated = True
+                try:
+                    sys.stdout.write(decoder.decode(chunk))
+                    sys.stdout.flush()
+                except (OSError, UnicodeError, ValueError):
+                    pass
+    thread = threading.Thread(target=copy, daemon=True)
+    thread.start()
+    try:
+        with os.fdopen(write_fd, "wb") as sink:
+            process = subprocess.run(command, check=False, env=env, stdout=sink,
+                                     stderr=subprocess.STDOUT, timeout=timeout)
+    finally:
+        thread.join(timeout=5)
+    return process.returncode, output.decode("utf-8", errors="replace"), truncated or thread.is_alive()
+
+
+def classify_cli_failure(report: dict) -> dict:
+    """窄适配：只有更新阶段 EOF + 稳定原日志 + 正常退出，才证明尚未进入 Core。"""
+    e, cli = report.get("evidence", {}), report.get("cli", {})
+    output = cli.get("output", "")
+    eligible = (type(report.get("child_exit_code")) is int and 0 < report["child_exit_code"] < 126
+                and not report.get("runner_error") and e.get("state") == "unchanged"
+                and e.get("before_exists") is True and e.get("after_exists") is True
+                and not cli.get("truncated", True) and report.get("command", {}).get("subcommand") in KNOWN_SUBCOMMANDS
+                and "Updating hot update files" in output and "Error: Network error" in output
+                and "unexpected end of file" in output
+                and not re.search(r"Hot update completed|Loading MaaCore|Adding task|Instance (?:created|destroyed)|Connecting", output))
+    phase = ("business" if e.get("callback_counts", {}).get("TaskChainStart") else
+             "core_initialization" if e.get("state") == "bounded" else "core_or_unknown")
+    return {"phase": "cli_hot_update" if eligible else phase,
+            "game_operated": False if eligible else "unknown",
+            "retry_eligible": bool(eligible), "process_exited": report.get("runner_error") is None,
+            "reason": "pre_core_network_eof" if eligible else "no_safe_pre_core_proof"}
+
+
+def _claim_retry(managed, report: dict) -> bool:
+    # 一次受管顶层运行共享一次额度，子组件/新 task 名不能重置；先落盘再启动。
+    from artifacts import safe_path
+    path = safe_path(managed.top / "cli-pre-core-retry.json", missing=True)
+    try:
+        with path.open("x", encoding="utf-8") as stream:
+            json.dump({"used": True, "failed_attempt": report, "claimed_at": _utc_now()}, stream, ensure_ascii=False)
+        return True
+    except FileExistsError:
+        return False
+
+
+def run_bounded(command: list[str], managed, *, core_log: Path | None = None,
+                dry_run: bool = False, timeout: float | None = None, env: dict | None = None) -> dict:
+    """共享 dry-run/真实执行的失败证据和重试预算，不改变命令、配置或网络环境。"""
+    environment = managed.environment(env)
+    # maa-cli 默认 Warn 会隐藏更新起始标记。仅为当前子进程补足可观测性，
+    # 保留显式日志级别；quiet/重定向导致证据不足时仍不猜测重试。
+    environment.setdefault("MAA_LOG", "info")
+    summary = {"executable": Path(command[0]).name, "subcommand": _safe_subcommand(command), "dry_run": dry_run}
+    attempts = []
+    for _ in range(2):
+        report = _run_command(command, core_log, _utc_now(), summary, environment,
+                              dry_run=dry_run, timeout=timeout)
+        report["failure"] = classify_cli_failure(report)
+        attempts.append(report)
+        path = managed.path / ("cli-attempt-" + uuid.uuid4().hex + ".json")
+        # 原始尝试分别持久化；重试成功不覆盖前一次退出码。
+        with path.open("x", encoding="utf-8") as stream:
+            json.dump(report, stream, ensure_ascii=False)
+        if not report["failure"]["retry_eligible"] or not _claim_retry(managed, report):
+            break
+        print("MAA 更新在进入游戏前失败；原进程已结束，在同一环境仅重试当前命令一次。", flush=True)
+    result = dict(attempts[-1])
+    result["attempts"] = attempts
+    result["recovery"] = {"retried": len(attempts) > 1,
+                          "retry_budget_used": (managed.top / "cli-pre-core-retry.json").exists(),
+                          "scope": "managed_run", "recovered": len(attempts) > 1 and result["wrapper_exit_code"] == 0}
+    return result
+
+
+def run_dry(command: list[str], managed, report_file: Path, *, env: dict | None = None,
+            timeout: float = 120) -> str:
+    if "--dry-run" not in command:
+        raise ValueError("dry_run_flag_required")
+    report = run_bounded(command, managed, dry_run=True, timeout=timeout, env=env)
+    with report_file.open("x", encoding="utf-8") as stream:
+        json.dump(report, stream, ensure_ascii=False)
+    if report["wrapper_exit_code"]:
+        error = subprocess.CalledProcessError(report["wrapper_exit_code"], command)
+        error.report = report
+        raise error
+    if report.get("cli", {}).get("truncated"):
+        raise ValueError("dry_run_output_truncated")
+    return report.get("cli", {}).get("output", "")
 
 
 def _callback_context(line: str, value: dict) -> tuple:
@@ -201,7 +312,7 @@ def _snapshot(path: Path) -> dict[str, Any]:
     }
 
 
-def _discover_core_log(executable: str) -> Path:
+def _discover_core_log(executable: str, env: dict | None = None) -> Path:
     result = subprocess.run(
         [executable, "dir", "log", "--batch"],
         check=False,
@@ -210,6 +321,7 @@ def _discover_core_log(executable: str) -> Path:
         encoding="utf-8",
         errors="replace",
         timeout=30,
+        **({"env": env} if env is not None else {}),
     )
     if result.returncode != 0:
         raise RuntimeError("maa dir log failed")
@@ -318,6 +430,8 @@ def _collect_evidence(
         "log_file": str(path),
         "before_size": before["size"],
         "after_size": after["size"],
+        "before_exists": before["exists"],
+        "after_exists": after["exists"],
         "start_line": None,
         "end_line": None,
         "state": "missing",
@@ -388,7 +502,7 @@ def _emit_report(report: dict[str, Any], report_file: Path | None, *, exclusive:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run one maa-cli process and bound its MaaCore log evidence."
+        description="Run maa-cli with bounded evidence and one shared pre-Core network retry."
     )
     parser.add_argument(
         "--core-log",
@@ -418,22 +532,27 @@ def _unavailable_report(started_at: str, command_summary: dict, error: Exception
 
 
 def _run_command(command: list[str], core_log: Path | None, started_at: str,
-                 command_summary: dict, env: dict) -> dict:
+                 command_summary: dict, env: dict, *, dry_run: bool = False,
+                 timeout: float | None = None) -> dict:
     try:
-        core_log = core_log or _discover_core_log(command[0])
+        core_log = core_log or _discover_core_log(command[0], env)
         before = _snapshot(core_log)
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         return _unavailable_report(started_at, command_summary, error)
 
     runner_error: str | None = None
+    output, truncated = "", False
     try:
-        child_exit_code = subprocess.run(command, check=False, env=env).returncode
+        child_exit_code, output, truncated = _execute(command, env, timeout)
     except KeyboardInterrupt:
         child_exit_code = 130
         runner_error = "KeyboardInterrupt"
     except OSError as error:
         child_exit_code = 127
         runner_error = type(error).__name__
+    except subprocess.TimeoutExpired:
+        child_exit_code = 124
+        runner_error = "TimeoutExpired"
 
     try:
         after = _snapshot(core_log)
@@ -443,7 +562,9 @@ def _run_command(command: list[str], core_log: Path | None, started_at: str,
         runner_error = type(error).__name__
 
     wrapper_exit_code = child_exit_code
-    if child_exit_code == 0 and evidence["state"] != "bounded":
+    if child_exit_code == 0 and dry_run:
+        wrapper_exit_code = 0
+    elif child_exit_code == 0 and evidence["state"] != "bounded":
         wrapper_exit_code = EVIDENCE_UNAVAILABLE_EXIT
     elif child_exit_code == 0 and evidence.get("execution", {}).get("status") == "failed":
         wrapper_exit_code = TASKCHAIN_ERROR_EXIT
@@ -458,6 +579,7 @@ def _run_command(command: list[str], core_log: Path | None, started_at: str,
         "child_exit_code": child_exit_code,
         "wrapper_exit_code": wrapper_exit_code,
         "runner_error": runner_error,
+        "cli": {"output": output, "truncated": truncated},
         "evidence": evidence,
         "business_result": "not_evaluated",
     }
@@ -509,7 +631,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _emit_report(_unavailable_report(started_at, command_summary, error), None)
 
         print(f"MAA_EVIDENCE_REPORT={report_file}", flush=True)
-        report = _run_command(command, args.core_log, started_at, command_summary, managed.environment())
+        report = run_bounded(command, managed, core_log=args.core_log, dry_run="--dry-run" in command)
         child_exit = report["child_exit_code"]
         settled = child_exit is None or (child_exit >= 0 and child_exit != 130)
         exit_code = _emit_report(report, report_file, exclusive=exclusive)

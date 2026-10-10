@@ -18,6 +18,30 @@
     "algorithm": "OcrDetect", "text": [], "roi": [0, 0, 1280, 720],
     "action": "DoNothing", "maxTimes": 1, "next": []
   },
+  "MaaDailyMedicine@ScanOpen": {
+    "algorithm": "OcrDetect", "text": ["开始行动"], "fullMatch": true,
+    "roi": [1010, 625, 260, 61], "action": "ClickSelf", "postDelay": 3000,
+    "maxTimes": 1, "next": ["MaaDailyMedicine@ScanDialog"]
+  },
+  "MaaDailyMedicine@ScanDialog": {
+    "algorithm": "MatchTemplate", "template": "UseMedicine.png", "templThreshold": 0.7,
+    "roi": [580, 50, 400, 100], "action": "DoNothing", "maxTimes": 1,
+    "next": ["MaaDailyMedicine@ScanExpiryA"]
+  },
+  "MaaDailyMedicine@ScanExpiryA": {
+    "algorithm": "OcrDetect", "text": [], "roi": [0, 0, 1280, 720],
+    "action": "DoNothing", "postDelay": 700, "maxTimes": 1,
+    "next": ["MaaDailyMedicine@ScanExpiryB"]
+  },
+  "MaaDailyMedicine@ScanExpiryB": {
+    "algorithm": "OcrDetect", "text": [], "roi": [0, 0, 1280, 720],
+    "action": "DoNothing", "maxTimes": 1, "next": ["MaaDailyMedicine@ScanClose"]
+  },
+  "MaaDailyMedicine@ScanClose": {
+    "algorithm": "MatchTemplate", "template": "UseMedicine.png", "templThreshold": 0.7,
+    "roi": [580, 50, 400, 100], "action": "ClickRect", "specificRect": [0, 200, 300, 400],
+    "postDelay": 1000, "maxTimes": 1, "next": ["MaaDailyCheck@VerifyStage"]
+  },
   "MaaDailyMedicine@Close": {
     "algorithm": "MatchTemplate", "template": "UseMedicine.png", "templThreshold": 0.7,
     "roi": [580, 50, 400, 100], "action": "ClickRect", "specificRect": [0, 200, 300, 400],

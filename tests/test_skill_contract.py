@@ -179,7 +179,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("`FightTimes.times_finished = 0` 不是", safety)
         self.assertIn("`StartButton2`、`PRTS1/2/3`", safety)
         self.assertIn("进程退出不代表游戏中的当前战斗被取消", safety)
-        self.assertIn("CLI 更新网络失败，业务任务未开始", safety)
+        # 更新前失败/业务已开始的区分由 test_cli_recovery 验证，不锁定文案。
         self.assertIn("Unknown task: FightSeries-OldMethodFlag", safety)
 
     def test_references_have_verification_metadata(self) -> None:

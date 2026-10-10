@@ -19,7 +19,7 @@ from infrast_check import inspect_report as inspect_infrast
 from medicine_policy import load_policy
 from medicine_sanity import preflight as medicine_preflight
 from reward_check import check_install, game_day, scan_once
-from run_with_evidence import classify_execution
+from run_with_evidence import classify_execution, run_dry
 from stage_runtime import normalize_stage
 from recruit_check import inspect_report as inspect_recruit
 from daily_report import summarize
@@ -215,8 +215,7 @@ class Daily:
             if not task.get("variants") or any("condition" not in v for v in task["variants"]):
                 unconditional.add(label)
         command = [self.maa, "run", name, "--profile", self.profile, "--batch", "--dry-run", "-vv"]
-        p = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", check=True, timeout=120)
-        raw = p.stdout + "\n" + p.stderr
+        raw = run_dry(command, self.runtime.artifacts, self.output / (name + ".dry-run.json"))
         (self.output / (name + ".dry-run.txt")).write_text(raw, encoding="utf-8")
         if source.read_bytes() != raw_source:
             raise ValueError("native_config_changed_during_resolution")
@@ -251,13 +250,15 @@ class Daily:
             e = report["evidence"]
             observations.append({"type": task["type"], "execution": "completed", "business_result": "not_evaluated",
                                  "internal_error_lines": e.get("internal_error_lines", []),
-                                 "subtask_error_lines": e.get("subtask_error_lines", [])})
+                                 "subtask_error_lines": e.get("subtask_error_lines", []),
+                                 "recovery": report.get("recovery", {})})
             if task["type"] == "Recruit":
                 observations[-1]["recruitment"] = inspect_recruit(report)
             # Priority may be embedded in a pre file; validate immediately, not after consuming normal sanity.
             if task["type"] == "Fight":
                 self.priority_reports.append(priority_result(report, task["params"], self.config["priority_goal"]))
         warnings = any(v["internal_error_lines"] or v["subtask_error_lines"]
+                       or v.get("recovery", {}).get("retried")
                        or v.get("recruitment", {}).get("reminder_required") for v in observations)
         return {"status": "completed_with_reminder" if warnings else "completed", "task_count": len(self.before),
                 "tasks": observations, "reminder_required": warnings, "reports": str(self.output / "processes.json")}
@@ -283,6 +284,8 @@ class Daily:
         sanity = value.get("remaining_sanity")
         if type(sanity) is not int or not 0 <= sanity < stage_cost(self.stage) or value.get("stage") != self.stage:
             raise ValueError("drain_goal_unverified")
+        if value.get("end_at") != "prepared":
+            return {**value, "status": "stopped", "reason": "drain_page_unverified"}
         return value
 
     def award(self):

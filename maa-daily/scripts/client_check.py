@@ -146,7 +146,8 @@ def scan_once(maa: str, profile: str, output: Path | None = None) -> tuple[dict,
         live_requested = False
         try:
             # 两次校验间不接受并发配置写入；dry-run 不证明真实 OCR 成功。
-            subprocess.run(command + ["--dry-run"], check=True, env=artifacts.environment())
+            from run_with_evidence import run_dry
+            run_dry(command + ["--dry-run"], artifacts, artifacts.path / "dry-run.json")
             check_install(maa)
             runner = Path(__file__).with_name("run_with_evidence.py")
             live_requested = True

@@ -51,7 +51,9 @@ python <skill-root>/scripts/drain_sanity.py run --policy <本机策略.toml> --s
 
 ## 收尾检测与汇报
 
-两模式在清理成功、理智不足单场后都检测。检测依赖不足理智时点击“开始行动”打开的恢复窗口，不是库存 API。封闭 Custom 链只打开、双读有效期并关闭，不确认吃药或出击；不为检测额外打关。异常/预算停止时不强行检查，保留未检查提醒。
+两模式在清理成功、理智不足单场后都检测。检测依赖不足理智时点击“开始行动”打开的恢复窗口，不是库存 API。一次 Custom 链依次打开、双读有效期、模板确认窗口后关闭、核验目标准备页和理智；不在扫描与关窗之间重新启动 maa-cli，不确认吃药或出击，不为检测额外打关。异常/预算停止时不强行检查，保留未检查提醒。扫描节点未能完成时不强行执行坐标清理；关窗仍须匹配恢复窗口模板。
+
+升级后先运行 `daily_checks.py prepare` 部署新增 `Scan*` 节点（旧节点保留，不覆盖用户修改）；准备页核验节点只由组件写入隔离配置。没有部署时在游戏操作前停止。
 
 `medicine_sanity.py check --policy <策略> --stage AP-5 --profile <profile> --maa <exe> --output-dir <目录>` 仅供独立只读检查。理智足够时报告前置不满足；`--dialog-open` 仅供已打开窗口的诊断，仍需 MAA 模板确认，不由 Agent 目测。
 
@@ -59,9 +61,13 @@ python <skill-root>/scripts/drain_sanity.py run --policy <本机策略.toml> --s
 - `unknown`：没有可靠正向结果、空窗口或识别失败，提醒无法确认；不等同于没有。
 - 当前不能可靠输出完整库存、药品总恢复量或“所有临期药已用完”；`medicine_goal` 在用药模式保持 `unknown`。
 
-`result.json` 分开记录 `completed_runs`、`medicine_used`、`remaining_sanity`、`medicine_check`、各阶段与内部告警。`completed_with_reminder` 表示理智目标已达成但药物检查有提醒，并非完整用药目标已完成；调用退出 0 后仍须读取这些字段。检查失败不抹掉战斗结果，但终态页面保守报告未知。不用药时也不能省略剩余临期药提醒；用药时汇报已核验瓶数，不能从配置推算实际消耗。
+`result.json` 分开记录 `completed_runs`、`medicine_used`、`remaining_sanity`、`medicine_check`、各阶段与内部告警。`completed_with_reminder` 表示理智目标已达成但药物检查有提醒，并非完整用药目标已完成；调用退出 0 后仍须读取这些字段。不用药时也不能省略剩余临期药提醒；用药时汇报已核验瓶数，不能从配置推算实际消耗。
+
+`medicine-check.json` 与 `medicine_check` 分别保留库存 `status`、`scan_status`、`cleanup_status`、`page_status` / `end_at` 和 `execution_status`。例如扫描已确认临期药，随后关窗失败，仍保留 `detected`，但页面未知；关窗完成而准备页核验失败，则保留 `closed`，不冒充 `prepared`。失败报告的原退出码和日志边界不变。库存未知但准备页已确认时，完整日常保留提醒并继续领奖；终态页面未知时停止后续业务，不能凭理智已经清完继续。后续恢复不能重跑已完成战斗。
 
 ## 验证边界
+
+2026-10-10：合并检测链与分阶段结果通过离线故障注入验证，覆盖关窗失败、返回核验失败、库存未知但页面已恢复。同日 maa-cli 0.7.5 / MaaCore 6.17.1 / Windows MuMu 实机覆盖 CE-6 准备页自动打开恢复窗口，以及窗口已打开两个起点；新链分别完成 9/8 个节点，无子任务错误或内部 ERR，均双读有效期、关闭窗口、核验返回准备页。范围 1 的库存结果保持 unknown，可见有效期为原生范围 2，但 `cleanup_status=closed`、`end_at=prepared`，没有用药或战斗。不以此证明完整库存、其它布局或所有故障恢复；现场异常分支仍由离线故障注入覆盖。
 
 2026-09-13：之前的有界真实样本已覆盖恢复窗口检测、原生临期药消费、消费后重新读取并无药补尾；另有原生 AUTO 独立样本，但不作为本固定倍率策略的真实验证。
 

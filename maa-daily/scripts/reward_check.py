@@ -343,8 +343,9 @@ def scan_once(maa: str, profile: str, output: Path | None = None, *, parent=None
         temporary_tasks.append(path)
         (run_dir / copy_name).write_bytes(path.read_bytes())
     def execute(task, target):
+        from run_with_evidence import run_dry
         command = [maa, "run", task, "--batch", "--profile", profile, "--user-resource"]
-        subprocess.run(command + ["--dry-run"], check=True, env=env)
+        run_dry(command + ["--dry-run"], artifacts, target.with_suffix(".dry-run.json"), env=env)
         return subprocess.run([sys.executable, "-B", runner, "--report-file", str(target), "--", *command], env=env).returncode
     result = unknown("navigation_failed")
     try:

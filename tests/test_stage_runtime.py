@@ -14,6 +14,10 @@ from daily_checks import stage_cost
 
 
 class StageTests(unittest.TestCase):
+    def setUp(self):
+        from fake_cli import dry
+        self.enterContext(patch.object(drain, "run_dry", side_effect=dry))
+
     def test_navigation_warnings_preserved_but_do_not_replace_semantic_checks(self):
         from test_drain_sanity import DrainTests, event
         fixture = DrainTests()

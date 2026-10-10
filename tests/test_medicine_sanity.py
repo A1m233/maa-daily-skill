@@ -40,6 +40,72 @@ def scan_body(text="7小时", score=.999, x=850, mutate=None):
 
 
 class MedicineTests(unittest.TestCase):
+    def session_body(self, *, close=True, probe=True, text="7小时", terminal="TaskChainCompleted"):
+        from test_drain_sanity import probe_body
+        body = scan_body(text=text).replace('"Dialog"', '"ScanDialog"').replace(
+            '"ExpiryA"', '"ScanExpiryA"').replace('"ExpiryB"', '"ScanExpiryB"')
+        body = body.replace("MaaDailyMedicine@Dialog", "MaaDailyMedicine@ScanDialog").replace(
+            "MaaDailyMedicine@Expiry", "MaaDailyMedicine@ScanExpiry")
+        # OCR happens before SubTaskCompleted in real logs.
+        lines = body.splitlines(keepends=True)
+        for i in range(len(lines)-1):
+            if "SubTaskCompleted" in lines[i] and "OcrDetect" in lines[i+1]:
+                lines[i], lines[i+1] = lines[i+1], lines[i]
+        body = "".join(lines[:-1])
+        if close:
+            body += event("SubTaskCompleted", taskchain="Custom", taskid=1, first=[med.MP+"ScanDialog"],
+                          details={"task":"ScanClose", "action":"ClickRect"})
+        if probe:
+            prepared = probe_body().replace("VerifyAP5", "VerifyStage").replace(
+                "MaaDailyCheck@VerifyStage", med.MP+"ScanDialog")
+            body += "".join(prepared.splitlines(keepends=True)[1:-1])
+        if terminal == "TaskChainError":
+            body += event("SubTaskError", taskchain="Custom", taskid=1, first=[med.MP+"ScanDialog"])
+        return body + event(terminal, taskchain="Custom", taskid=1)
+
+    def test_combined_session_and_partial_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for close, probe, expected in [(True, True, ("detected", "closed", "prepared")),
+                                           (False, False, ("detected", "unknown", "unknown")),
+                                           (True, False, ("detected", "closed", "unknown"))]:
+                value = report(directory, self.session_body(close=close, probe=probe,
+                    terminal="TaskChainCompleted" if probe else "TaskChainError"))
+                if not probe:
+                    value.update(child_exit_code=1, wrapper_exit_code=1)
+                result = med.read_session(value, "AP-5", 1, "ScanDialog")
+                self.assertEqual((result["status"], result["cleanup_status"], result["end_at"]), expected)
+                self.assertEqual(value["child_exit_code"], 0 if probe else 1)
+            unknown = med.read_session(report(directory, self.session_body(text="7天")), "AP-5", 1, "ScanDialog")
+            self.assertEqual((unknown["status"], unknown["end_at"]), ("unknown", "prepared"))
+
+    def test_session_rejects_foreign_actions_wrong_stage_and_changed_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            body = self.session_body()
+            for bad in (body.replace('"ClickRect"', '"ClickSelf"'),
+                        body.replace('"taskid": 1', '"taskid": 2', 1)):
+                value = med.read_session(report(directory, bad), "AP-5", 1, "ScanDialog")
+                self.assertEqual(value["end_at"], "unknown")
+            value = med.read_session(report(directory, body), "CE-6", 1, "ScanDialog")
+            self.assertEqual(value["status"], "detected")
+            self.assertEqual(value["end_at"], "unknown")
+            evidence = report(directory, body)
+            Path(evidence["evidence"]["log_file"]).write_bytes(b"changed")
+            self.assertEqual(med.read_session(evidence, "AP-5", 1, "ScanDialog")["scan_status"], "unknown")
+
+    def test_scan_has_one_combined_process_even_when_close_fails(self):
+        from drain_sanity import ProcessUnverified
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Mock(output=Path(directory))
+            value = report(directory, self.session_body(close=False, probe=False, terminal="TaskChainError"))
+            value.update(child_exit_code=1, wrapper_exit_code=1)
+            runtime.run.side_effect = ProcessUnverified("runner_failed: 1", value)
+            result = med.scan(runtime, "AP-5", 1, dialog_open=True)
+            runtime.run.assert_called_once()
+            self.assertEqual(result["status"], "detected")
+            self.assertEqual(result["cleanup_status"], "unknown")
+            self.assertTrue((Path(directory)/"medicine-check.json").is_file())
+
     def test_native_day_semantics_not_calendar_days(self):
         for text, expected in (("7小时", 1), ("C7小时", 1), ("59分钟", 1), ("7天", 8), ("1天", 2),
                                ("使用药剂", None), ("", None)):
@@ -225,12 +291,12 @@ class MedicineTests(unittest.TestCase):
         for name, spec in nodes.items():
             self.assertNotIn("baseTask", spec)
             self.assertEqual(spec["maxTimes"], 1)
-            self.assertTrue(all(n in nodes for n in spec["next"]))
+            self.assertTrue(all(n in nodes or n == "MaaDailyCheck@VerifyStage" for n in spec["next"]))
             self.assertNotIn("sub", spec)
             self.assertNotIn("onErrorNext", spec)
-            if name.endswith("@Open"):
+            if name.endswith(("@Open", "@ScanOpen")):
                 self.assertEqual(spec["action"], "ClickSelf")
-            elif name.endswith("@Close"):
+            elif name.endswith(("@Close", "@ScanClose")):
                 self.assertEqual(spec["action"], "ClickRect")
             else:
                 self.assertEqual(spec["action"], "DoNothing")

@@ -266,6 +266,10 @@ class ClientUpdateReportTests(unittest.TestCase):
 
 
 class ClientUpdateScanTests(unittest.TestCase):
+    def setUp(self):
+        from fake_cli import dry
+        self.enterContext(patch("run_with_evidence.run_dry", side_effect=dry))
+
     def installed(self, directory):
         config = Path(directory) / "config"
         (config / "tasks").mkdir(parents=True)

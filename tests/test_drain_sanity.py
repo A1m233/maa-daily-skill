@@ -38,6 +38,10 @@ def probe_body(stage="AP-5", score=0.925990, mutate=lambda rows: None):
 
 
 class DrainTests(unittest.TestCase):
+    def setUp(self):
+        from fake_cli import dry
+        self.enterContext(patch.object(drain, "run_dry", side_effect=dry))
+
     def failed_fight_body(self):
         return (event("TaskChainStart") +
                 event("SubTaskError", subtask="RecognizeDrops", why="drop recognition error") +

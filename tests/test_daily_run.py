@@ -15,6 +15,39 @@ import daily_run as daily
 
 
 class DailyTests(unittest.TestCase):
+    def test_medicine_unknown_continues_only_after_page_recovery(self):
+        import subprocess
+        for page in ("prepared", "unknown"):
+            with self.subTest(page=page), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                ops = object.__new__(daily.Daily)
+                ops.output, ops.stage, ops.policy = root, "AP-5", root / "policy.toml"
+                ops.maa, ops.profile, ops.day, ops.account = "fake-maa", "test", "2026-10-10", "sample"
+                ops.config = {"maximum": 10, "max_runs": 100, "max_phases": 5}
+                ops.runtime = Mock(stage_config=root)
+                ops.runtime.artifacts.environment.return_value = {}
+                target = root / "sanity/drain-fixture"
+                target.mkdir(parents=True)
+                (target / "result.json").write_text(json.dumps({
+                    "status": "completed_with_reminder", "stage": "AP-5", "remaining_sanity": 5,
+                    "completed_runs": 6, "end_at": page,
+                    "medicine_check": {"status": "unknown", "cleanup_status": "closed"},
+                    "reminder_required": True}), encoding="utf-8")
+                ops.check_day = Mock()
+                ops.pre = Mock(return_value={"status":"completed"})
+                ops.priority = Mock(return_value={"status":"not_scheduled"})
+                ops.award = Mock(return_value={"status":"completed"})
+                ops.checks = Mock(return_value={"status":"completed"})
+                with patch.object(daily.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+                    result = daily.execute_flow(ops, lambda _: None)
+                self.assertEqual(result["steps"]["drain"]["completed_runs"], 6)
+                if page == "prepared":
+                    ops.award.assert_called_once()
+                    self.assertEqual(result["status"], "completed_with_reminder")
+                else:
+                    ops.award.assert_not_called()
+                    self.assertEqual(result["status"], "incomplete")
+
     def test_cli_end_output_uses_brief_and_keeps_json_opt_in(self):
         for status in ('completed', 'incomplete'):
             for output_format in ('brief', 'json'):

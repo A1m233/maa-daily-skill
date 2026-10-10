@@ -48,7 +48,7 @@ def plan(sanity: int, cost: int, maximum: int) -> dict:
             "next_fight": next_fight, "reobserve_after_fight": bool(count)}
 
 
-def inspect_report(report: dict) -> dict:
+def inspect_report(report: dict, *, probe_origin: str | None = None) -> dict:
     """Read only the runner's byte interval; never fall back to the whole log."""
     result = {"sanity": None, "ocr": [], "daily_orundum": "unknown",
               "daily_annihilation_ticket": "unknown", "reminder_required": True,
@@ -87,7 +87,8 @@ def inspect_report(report: dict) -> dict:
                 if (isinstance(task, str) and "@" not in task
                         and value.get("taskchain") == "Custom"
                         and isinstance(first, list) and first
-                        and all(isinstance(item, str) and item.startswith(PREFIX) for item in first)):
+                        and (first == [probe_origin] if probe_origin is not None else
+                             all(isinstance(item, str) and item.startswith(PREFIX) for item in first))):
                     task = PREFIX + task
                 seen.add(task)
             if event == "TaskChainCompleted" and value.get("taskchain") == "Custom":

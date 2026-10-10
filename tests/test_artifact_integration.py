@@ -19,6 +19,8 @@ import reward_check
 
 class RewardArtifactTests(unittest.TestCase):
     def setUp(self):
+        from fake_cli import dry
+        self.enterContext(patch("run_with_evidence.run_dry", side_effect=dry))
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)

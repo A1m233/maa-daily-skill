@@ -17,6 +17,8 @@ import medicine_sanity as med
 
 class MedicineArtifactTests(unittest.TestCase):
     def setUp(self):
+        from fake_cli import dry
+        self.enterContext(patch.object(drain_sanity, "run_dry", side_effect=dry))
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
@@ -54,7 +56,7 @@ class MedicineArtifactTests(unittest.TestCase):
         return json.loads((self.runtime.output / a.MANIFEST_NAME).read_text(encoding="utf-8"))
 
     def test_optional_output_and_positive_result_finish_registered_package(self):
-        with patch.object(med, "scan", return_value={"status": "detected", "reminder_required": True}):
+        with patch.object(med, "scan", return_value={"status": "detected", "reminder_required": True, "end_at": "prepared"}):
             self.assertEqual(med.main(self.arguments), 0)
         self.assertTrue(self.runtime.output.is_relative_to(self.config / "maa-daily-artifacts/runs"))
         self.assertEqual((self.record()["state"], self.record()["status"]), ("finished", "detected"))
@@ -111,7 +113,7 @@ class MedicineArtifactTests(unittest.TestCase):
             result["warnings"].append("cleanup denied")
             return result
 
-        with patch.object(med, "scan", return_value={"status": "detected", "reminder_required": True}), \
+        with patch.object(med, "scan", return_value={"status": "detected", "reminder_required": True, "end_at": "prepared"}), \
                 patch.object(a.ArtifactRun, "finish", warn):
             self.assertEqual(med.main(self.arguments), 0)
         self.assertEqual(self.record()["state"], "finished")

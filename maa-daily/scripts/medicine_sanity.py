@@ -12,6 +12,7 @@ import sys
 
 from daily_checks import stage_cost
 from drain_sanity import Runtime, callbacks, recorded_callbacks, navigate, read_probe, write_json
+from log_evidence import read_evidence
 from stage_runtime import normalize_stage, probe_task
 from medicine_policy import load_policy
 from reward_check import OCR_ITEM
@@ -53,13 +54,7 @@ def read_scan(report: dict, days: int, entry: str) -> dict:
     if completed != expected:
         raise ValueError("medicine_scan_incomplete")
     evidence = report["evidence"]
-    with Path(evidence["log_file"]).open("rb") as handle:
-        handle.seek(evidence["before_size"])
-        data = handle.read(evidence["after_size"] - evidence["before_size"])
-    # callbacks already verified the interval; detect a concurrent rewrite as well.
-    import hashlib
-    if hashlib.sha256(data).hexdigest() != evidence["interval_sha256"]:
-        raise ValueError("changed_log_interval")
+    data = read_evidence(evidence)
     return read_expiry(data, days)
 
 
@@ -138,12 +133,7 @@ def read_session(report: dict, stage: str, days: int, entry: str) -> dict:
             if kind == "SubTaskCompleted":
                 completed.append(name)
         e = report["evidence"]
-        with Path(e["log_file"]).open("rb") as handle:
-            handle.seek(e["before_size"])
-            data = handle.read(e["after_size"] - e["before_size"])
-        import hashlib
-        if hashlib.sha256(data).hexdigest() != e["interval_sha256"]:
-            raise ValueError("changed_log_interval")
+        data = read_evidence(e)
         # 只读取已完成双读之前的日志；后续关窗/复核错误不抹掉扫描事实。
         lines = data.decode("utf-8").splitlines(keepends=True)
         end = next((i for i, line in enumerate(lines) if "SubTaskCompleted" in line

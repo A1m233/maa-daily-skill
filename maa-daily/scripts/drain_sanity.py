@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import hashlib
 import json
 import math
 import os
@@ -18,6 +17,7 @@ from daily_checks import inspect_report, plan, stage_cost
 from medicine_policy import load_policy, validate_policy, recovery_task, inspect_recovery
 from stage_runtime import VERIFY, normalize_stage, probe_task, isolated_config, STOP_NODES
 from run_with_evidence import run_dry
+from log_evidence import read_evidence
 
 STAGES = {"AP-5": "VerifyAP5", "CE-6": "VerifyCE6", "LS-6": "VerifyLS6"}  # 只用于旧报告兼容，不限制新入口。
 PREFIX = "MaaDailyCheck@"
@@ -36,14 +36,7 @@ def recorded_callbacks(report: dict) -> list[tuple[str, dict]]:
     evidence = report["evidence"]
     if evidence.get("state") != "bounded":
         raise ValueError("process_failed_or_unbounded")
-    start, end = evidence["before_size"], evidence["after_size"]
-    if type(start) is not int or type(end) is not int or not 0 <= start < end or end-start > 64*1024*1024:
-        raise ValueError("invalid_interval")
-    with Path(evidence["log_file"]).open("rb") as handle:
-        handle.seek(start)
-        data = handle.read(end-start)
-    if len(data) != end-start or hashlib.sha256(data).hexdigest() != evidence.get("interval_sha256"):
-        raise ValueError("changed_log_interval")
+    data = read_evidence(evidence)
     events = []
     for line in data.decode("utf-8").splitlines():
         if MARKER in line:
@@ -114,7 +107,7 @@ def fight_observation(report: dict) -> dict:
         result.update(status="observed", drop_status="failed" if drop_errors else "reported" if drops else "unknown",
                       reported_drop_stages=drops, drop_errors=drop_errors, chain_terminal=chains[-1][0],
                       source={k: report["evidence"].get(k) for k in
-                              ("log_file", "before_size", "after_size", "interval_sha256")})
+                              ("log_file", "before_size", "after_size", "interval_sha256", "segments")})
     except (OSError, ValueError, KeyError, TypeError) as error:
         result.update(status="unknown", observed_completed_runs=None, latest_sanity=None, reason=str(error))
     return result

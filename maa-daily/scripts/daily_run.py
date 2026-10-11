@@ -100,17 +100,12 @@ def validate_plan(pre: list[dict], selector: list[dict], award: list[dict]) -> s
 
 
 def verified_events(report: dict) -> list[tuple[str, dict]]:
+    from log_evidence import read_evidence
     evidence = report["evidence"]
-    start, end = evidence["before_size"], evidence["after_size"]
     if (report.get("child_exit_code") != 0 or report.get("wrapper_exit_code") != 0
-            or report.get("runner_error") or evidence.get("state") != "bounded"
-            or type(start) is not int or type(end) is not int or not 0 < end-start <= 64*1024*1024):
+            or report.get("runner_error") or evidence.get("state") != "bounded"):
         raise ValueError("invalid_phase_evidence")
-    with Path(evidence["log_file"]).open("rb") as handle:
-        handle.seek(start)
-        data = handle.read(end-start)
-    if len(data) != end-start or hashlib.sha256(data).hexdigest() != evidence.get("interval_sha256"):
-        raise ValueError("phase_log_changed")
+    data = read_evidence(evidence)
     lines = data.decode("utf-8").splitlines()
     if classify_execution(lines)["status"] != "completed":
         raise ValueError("phase_execution_incomplete")

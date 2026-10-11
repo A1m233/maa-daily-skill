@@ -23,6 +23,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from client_check import classify_client_update
+from log_evidence import MAX_INTERVAL_BYTES, read_evidence
 
 REPORT_PREFIX = "MAA_EVIDENCE_JSON="
 EVIDENCE_UNAVAILABLE_EXIT = 74
@@ -238,17 +239,15 @@ def inspect_execution_report(report: dict) -> dict:
     result = {"status": "unknown", "reason": "invalid_evidence", "business_result": "not_evaluated",
               "continuation": "blocked_execution", "original_wrapper_exit_code": report.get("wrapper_exit_code")}
     evidence = report.get("evidence", {})
-    start, end, first_line = evidence.get("before_size"), evidence.get("after_size"), evidence.get("start_line")
+    first_line = evidence.get("start_line")
     child_exit = report.get("child_exit_code")
     if (report.get("schema_version") not in (1, 2) or type(report.get("wrapper_exit_code")) is not int
-            or evidence.get("state") != "bounded" or type(start) is not int or type(end) is not int
-            or not 0 <= start < end or end - start > 64 * 1024 * 1024
+            or evidence.get("state") != "bounded"
             or type(first_line) is not int or first_line < 1 or type(child_exit) is not int):
         return result
-    with Path(evidence["log_file"]).open("rb") as handle:
-        handle.seek(start)
-        data = handle.read(end - start)
-    if len(data) != end - start or hashlib.sha256(data).hexdigest() != evidence.get("interval_sha256"):
+    try:
+        data = read_evidence(evidence)
+    except ValueError:
         result["reason"] = "log_interval_changed_or_unhashed"
         return result
     parsed = _parse_callbacks(data, first_line)
@@ -278,14 +277,6 @@ def _utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
-def _count_newlines(path: Path) -> int:
-    count = 0
-    with path.open("rb") as handle:
-        while chunk := handle.read(1024 * 1024):
-            count += chunk.count(b"\n")
-    return count
-
-
 def _snapshot(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {
@@ -300,12 +291,26 @@ def _snapshot(path: Path) -> dict[str, Any]:
     stat = path.stat()
     tail_start = max(stat.st_size - TAIL_WINDOW, 0)
     with path.open("rb") as handle:
+        digest, lines = hashlib.sha256(), 0
+        remaining = stat.st_size
+        while remaining:
+            chunk = handle.read(min(remaining, 1024 * 1024))
+            if not chunk:
+                raise OSError("log changed during snapshot")
+            digest.update(chunk)
+            lines += chunk.count(b"\n")
+            remaining -= len(chunk)
         handle.seek(tail_start)
-        tail_sha256 = hashlib.sha256(handle.read()).hexdigest()
+        tail_sha256 = hashlib.sha256(handle.read(stat.st_size - tail_start)).hexdigest()
+    after = path.stat()
+    if (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+        raise OSError("log changed during snapshot")
     return {
         "exists": True,
         "size": stat.st_size,
-        "newline_count": _count_newlines(path),
+        "newline_count": lines,
+        "sha256": digest.hexdigest(),
+        "mtime_ns": stat.st_mtime_ns,
         "identity": [stat.st_dev, stat.st_ino],
         "tail_start": tail_start,
         "tail_sha256": tail_sha256,
@@ -343,10 +348,55 @@ def _discover_artifact_config(executable: str) -> Path:
     return Path(lines[-1])
 
 
-def _read_appended(path: Path, start: int) -> bytes:
+def _read_appended(path: Path, start: int, end: int) -> bytes:
+    if not 0 <= end - start <= MAX_INTERVAL_BYTES:
+        raise ValueError("log interval exceeds limit")
     with path.open("rb") as handle:
         handle.seek(start)
-        return handle.read()
+        data = handle.read(end - start)
+    if len(data) != end - start:
+        raise OSError("log interval no longer available")
+    return data
+
+
+def _rotated_interval(path: Path, before: dict, after: dict) -> tuple[bytes, list[dict]]:
+    """仅恢复官方 rename 留下的一次完整轮转；不会用旧报告猜补缺段。"""
+    if path.name != "asst.log" or not before["exists"] or not before["identity"]:
+        raise ValueError("rotation_origin_unverified")
+    backup = path.with_name("asst.bak.log")
+    saved = _snapshot(backup)
+    if (not saved["exists"] or saved["identity"] != before["identity"]
+            or saved["size"] < before["size"] or after["identity"] == before["identity"]):
+        raise ValueError("rotation_origin_unverified")
+    size = saved["size"] - before["size"] + after["size"]
+    if not 0 < size <= MAX_INTERVAL_BYTES:
+        raise ValueError("rotation_interval_too_large")
+    # 完整旧前缀匹配防止同一文件被原位改写，仅末尾相似不足以证明归属。
+    digest = hashlib.sha256()
+    with backup.open("rb") as handle:
+        remaining = before["size"]
+        while remaining:
+            chunk = handle.read(min(remaining, 1024 * 1024))
+            if not chunk:
+                raise ValueError("rotation_prefix_missing")
+            digest.update(chunk)
+            remaining -= len(chunk)
+    if digest.hexdigest() != before.get("sha256"):
+        raise ValueError("rotation_prefix_changed")
+    old = _read_appended(backup, before["size"], saved["size"])
+    new = _read_appended(path, 0, after["size"])
+    if hashlib.sha256(new).hexdigest() != after["sha256"]:
+        raise ValueError("rotation_current_changed")
+    # 读取期间的再次轮转/覆盖不能拼成一份看似完整的报告。
+    if _snapshot(backup) != saved or _snapshot(path) != after:
+        raise ValueError("rotation_changed_during_read")
+    segments = []
+    for file, start, end, first_line, data in (
+            (backup, before["size"], saved["size"], before["newline_count"] + 1, old),
+            (path, 0, after["size"], 1, new)):
+        segments.append({"log_file": str(file), "before_size": start, "after_size": end,
+                         "start_line": first_line, "interval_sha256": hashlib.sha256(data).hexdigest()})
+    return old + new, segments
 
 
 def _safe_subcommand(command: Sequence[str]) -> str | None:
@@ -462,12 +512,19 @@ def _collect_evidence(
         )
     if identity_changed or after["size"] < before["size"] or prior_tail_changed:
         base["state"] = "rotated"
-        return base
-    if after["size"] == before["size"]:
+        try:
+            appended, segments = _rotated_interval(path, before, after)
+        except (OSError, ValueError) as error:
+            base["rotation_error"] = str(error)
+            return base
+        base.update(segments=segments, rotation_recovered=True, line_numbering="continuous_from_first_segment",
+                    rotation_anchor={"identity": before["identity"], "prefix_bytes": before["size"],
+                                     "prefix_sha256": before["sha256"]})
+    elif after["size"] == before["size"]:
         base["state"] = "unchanged"
         return base
-
-    appended = _read_appended(path, before["size"])
+    else:
+        appended = _read_appended(path, before["size"], after["size"])
     start_line = before["newline_count"] + 1
     parsed = _parse_callbacks(appended, start_line)
     base.update(parsed)
@@ -557,7 +614,7 @@ def _run_command(command: list[str], core_log: Path | None, started_at: str,
     try:
         after = _snapshot(core_log)
         evidence = _collect_evidence(core_log, before, after)
-    except OSError as error:
+    except (OSError, ValueError) as error:
         evidence = {"state": "unavailable", "log_file": str(core_log)}
         runner_error = type(error).__name__
 

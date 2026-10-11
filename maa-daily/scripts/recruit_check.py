@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """只读公招动作与标签保留证据，不计算干员组合或操作游戏。"""
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import sys
@@ -10,6 +9,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from run_with_evidence import classify_execution
+from log_evidence import read_evidence
 
 MARKER = "Assistant::append_callback | "
 
@@ -19,14 +19,11 @@ def inspect_report(report):
               "reminder_required": True, "observed_at": report.get("ended_at")}
     try:
         e = report["evidence"]
-        start, end = e["before_size"], e["after_size"]
-        if (e.get("state") != "bounded" or type(start) is not int or type(end) is not int
-                or not 0 <= start < end or end - start > 64 * 1024 * 1024):
+        if e.get("state") != "bounded":
             return result
-        with Path(e["log_file"]).open("rb") as handle:
-            handle.seek(start)
-            data = handle.read(end-start)
-        if len(data) != end-start or hashlib.sha256(data).hexdigest() != e.get("interval_sha256"):
+        try:
+            data = read_evidence(e)
+        except ValueError:
             return {**result, "reason": "log_interval_changed_or_unhashed"}
         lines = data.decode("utf-8").splitlines()
         chains = {}

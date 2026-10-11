@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import shutil
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,6 +11,7 @@ import io
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "maa-daily/scripts"))
 spec = importlib.util.spec_from_file_location("daily_checks", ROOT / "maa-daily/scripts/daily_checks.py")
 checks = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checks)

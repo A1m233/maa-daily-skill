@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import hashlib
 import json
 from pathlib import Path
 import re
@@ -15,6 +14,8 @@ import uuid
 
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from log_evidence import read_evidence
 
 PREFIX = "MaaDailyCheck@"
 ENTRY = PREFIX + "RewardScan"
@@ -142,13 +143,9 @@ def evaluate(report: dict) -> dict:
             or not 0 <= (end_time-start_time).total_seconds() <= 180
             or game_day(start_time) != game_day(end_time)):
         return unknown("time_boundary_invalid")
-    start, end = evidence["before_size"], evidence["after_size"]
-    if type(start) is not int or type(end) is not int or not 0 <= start < end:
-        return unknown("invalid_byte_interval")
-    with Path(evidence["log_file"]).open("rb") as handle:
-        handle.seek(start)
-        data = handle.read(end-start)
-    if len(data) != end-start or hashlib.sha256(data).hexdigest() != evidence.get("interval_sha256"):
+    try:
+        data = read_evidence(evidence)
+    except ValueError:
         return unknown("log_interval_changed")
     pages, done = {}, []
     chains, selection_ok = [], False
@@ -283,11 +280,7 @@ def read_page_recheck(report: dict, navigation_report: dict) -> dict:
     if done != list(PAGE_READS):
         raise ValueError("incomplete_page_recheck")
     evidence = report["evidence"]
-    with Path(evidence["log_file"]).open("rb") as handle:
-        handle.seek(evidence["before_size"])
-        data = handle.read(evidence["after_size"]-evidence["before_size"])
-    if hashlib.sha256(data).hexdigest() != evidence["interval_sha256"]:
-        raise ValueError("changed_log_interval")
+    data = read_evidence(evidence)
     pages = {}
     for line in data.decode("utf-8").splitlines():
         match = re.search(r"PipelineAnalyzer::analyze \| OcrDetect MaaDailyCheck@(RewardPageRecheck[AB]) (.*)$", line)

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 from pathlib import Path
 
 from run_with_evidence import classify_execution
+from log_evidence import read_evidence
 
 MARKER = "Assistant::append_callback | "
 CATEGORIES = {"可收获": "products", "订单交付": "orders", "干员信赖": "trust"}
@@ -65,14 +65,9 @@ def inspect_report(report: dict) -> dict:
     evidence = report.get("evidence", {})
     if evidence.get("state") != "bounded":
         return result
-    start, end = evidence.get("before_size"), evidence.get("after_size")
-    if (type(start) is not int or type(end) is not int
-            or not 0 <= start < end or end - start > 64 * 1024 * 1024):
-        return result
-    with Path(evidence["log_file"]).open("rb") as handle:
-        handle.seek(start)
-        data = handle.read(end - start)
-    if len(data) != end - start or hashlib.sha256(data).hexdigest() != evidence.get("interval_sha256"):
+    try:
+        data = read_evidence(evidence)
+    except ValueError:
         result["reason"] = "log_interval_changed_or_unhashed"
         return result
     lines = data.decode("utf-8", errors="strict").splitlines()

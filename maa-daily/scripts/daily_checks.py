@@ -8,6 +8,11 @@ import re
 import sys
 from pathlib import Path
 
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from log_evidence import read_evidence
+
 PREFIX = "MaaDailyCheck@"
 
 
@@ -59,17 +64,9 @@ def inspect_report(report: dict, *, probe_origin: str | None = None) -> dict:
             or evidence.get("internal_error_lines")):
         result["reason"] = "invalid_run_evidence"
         return result
-    start, end = evidence.get("before_size"), evidence.get("after_size")
-    if type(start) is not int or type(end) is not int or not 0 <= start < end:
-        raise ValueError("invalid log byte interval")
-    with Path(evidence["log_file"]).open("rb") as handle:
-        handle.seek(start)
-        data = handle.read(end - start)
-    if len(data) != end - start:
-        raise ValueError("log interval no longer available")
-    # A stale/rotated log may share its size. Require the runner's interval digest.
-    import hashlib
-    if hashlib.sha256(data).hexdigest() != evidence.get("interval_sha256"):
+    try:
+        data = read_evidence(evidence)
+    except ValueError:
         result["reason"] = "log_interval_changed_or_unhashed"
         return result
     seen = set()

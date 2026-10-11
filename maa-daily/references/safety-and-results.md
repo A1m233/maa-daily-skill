@@ -75,6 +75,10 @@ python <skill-root>/scripts/run_with_evidence.py \
 
 runner 使用待执行命令的同一个 `maa` 可执行文件调用 `maa dir log --batch`，在运行前后记录 `asst.log` 的文件大小和行号，再输出以 `MAA_EVIDENCE_JSON=` 开头的单行 JSON。报告默认写入[受管产物目录](artifacts.md)，无需每轮指定临时路径；上例的 `--report-file` 仅用于显式新文件，包外已有文件拒绝覆盖。只有当前环境已经证明 MaaCore 日志位于另一个精确路径时，才使用 `--core-log <path>` 覆盖自动发现；不要把示例或旧会话路径写死。
 
+MAA 的[日志实现（v6.17.1）](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Utils/Logger.hpp)在约 64 MiB 时把 `asst.log` 重命名为同目录 `asst.bak.log`。runner 支持运行中一次完整轮转：验证备份文件身份与运行前完整前缀哈希，再按顺序读取旧文件本轮尾段和新文件头段。报告仍为 `state=bounded`，增加 `rotation_recovered`、`rotation_anchor` 和两个带区间、物理起始行及哈希的 `segments`；顶层起止大小仍是原始观测值，不可再把两者之差当作拼接长度。顶层回调行号按首段起始行连续计数，跨段定位需按 segments 映射。总证据区间上限为 64 MiB。
+
+所有捆绑检查组件统一通过 `log_evidence.py` 校验分段及整体哈希，不要求 Agent 拼日志、改报告或重跑业务。未轮转的旧报告仍可读取；其封存区间后来移入 `asst.bak.log` 时，仅在原区间哈希完全匹配时回退读取。缺备份、文件身份不符、前缀改写、多次轮转缺段、读取期间变化或区间超限仍保留未核验。旧的 `state=rotated` 失败报告没有封存区间，不能靠更新自动补证或改成成功；需要独立取证后另行确定补跑范围。正常轮转的恢复不消耗网络重试额度，也不触发业务重试。
+
 报告只保留可复核的非业务结论：
 
 - 子进程与 wrapper 的退出码；
@@ -97,7 +101,7 @@ runner 不另存完整命令参数或 MaaCore 日志副本，`business_result` �
 python <skill-root>/scripts/run_with_evidence.py --inspect-report <原runner报告.json>
 ```
 
-入口只读取 schema 1/2 报告指定的日志字节区间并校验哈希（单区间上限 64 MiB），不调用 MAA、不写文件，拒绝与运行命令、`--core-log` 或 `--report-file` 混用。输出普通 JSON，保留 `original_wrapper_exit_code`，给出 `reassessed_wrapper_exit_code`、新版执行判断及全部子任务错误/内部错误行号，并在 `diagnostics.client_update` 提供客户端更新诊断；成功复核的进程退出码采用重新评估值，证据无效则返回 74。原报告不改写，日志尾部正常追加不影响原区间；原区间被覆盖或无法读取时保持 unknown。
+入口只读取 schema 1/2 报告指定的日志字节区间并校验哈希（含上述分段，合计上限 64 MiB），不调用 MAA、不写文件，拒绝与运行命令、`--core-log` 或 `--report-file` 混用。输出普通 JSON，保留 `original_wrapper_exit_code`，给出 `reassessed_wrapper_exit_code`、新版执行判断及全部子任务错误/内部错误行号，并在 `diagnostics.client_update` 提供客户端更新诊断；成功复核的进程退出码采用重新评估值，证据无效则返回 74。原报告不改写，日志尾部正常追加不影响原区间；原区间被覆盖或无法读取时保持 unknown。
 
 复核结果为 completed 只撤销执行边界的疑点，`business_result` 仍为 not_evaluated；它不消除真实重试，不核验目标账号，也不替换下游业务组件对原报告的严格检查。`continuation=requires_business_preconditions` 不是续跑许可。需要继续时先按[账号核验](multi-account.md#执行门禁)及当前设备、游戏日、界面与资源前置重新判断，不编辑原报告退出码来绕过组件门禁。
 

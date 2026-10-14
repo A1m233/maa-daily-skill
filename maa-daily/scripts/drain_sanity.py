@@ -16,7 +16,7 @@ import uuid
 from daily_checks import inspect_report, plan, stage_cost
 from medicine_policy import load_policy, validate_policy, recovery_task, inspect_recovery
 from stage_runtime import VERIFY, normalize_stage, probe_task, isolated_config, STOP_NODES
-from run_with_evidence import run_dry
+from run_with_evidence import run_dry, VERBOSE_ENV, output_detail
 from log_evidence import read_evidence
 
 STAGES = {"AP-5": "VerifyAP5", "CE-6": "VerifyCE6", "LS-6": "VerifyLS6"}  # 只用于旧报告兼容，不限制新入口。
@@ -506,10 +506,16 @@ def main(argv=None) -> int:
     parser.add_argument("--max-phases", type=int, default=5)
     parser.add_argument("--max-runs", type=int, default=100)
     parser.add_argument("--policy", type=Path, help="两模式临期药策略；省略时不用药，收尾检查范围为原生 1")
+    parser.add_argument("--verbose", action="store_true", help="诊断用：展开原生输出和完整结果；默认摘要加 result.json 路径")
     args = parser.parse_args(argv)
     if args.mode == "run" and (not 1 <= args.maximum <= 10
                                or args.max_phases < 1 or args.max_runs < 1):
         parser.error("run requires positive budgets, maximum in 1..10")
+    with output_detail(args.verbose):
+        return _main(args)
+
+
+def _main(args) -> int:
     from artifacts import ArtifactError
     runtime = None
     settled = False
@@ -557,7 +563,15 @@ def main(argv=None) -> int:
         result["warning_report_files"].extend(r["dry_run_report"] for r in runtime.reports
             if r.get("dry_run_recovery", {}).get("retried"))
         write_json(runtime.output / "result.json", result)
-        print(json.dumps(result, ensure_ascii=False))
+        if os.environ.get(VERBOSE_ENV) == "1":
+            print(json.dumps(result, ensure_ascii=False))
+        else:
+            summary = {k: result[k] for k in ("status", "reason", "stage", "cost", "sanity",
+                       "completed_runs", "remaining_sanity", "medicine_used", "medicine_goal",
+                       "reminder_required", "end_at", "battle_observation") if k in result}
+            summary["warning_report_count"] = len(result["warning_report_files"])
+            summary["result_file"] = str(runtime.output / "result.json")
+            print(json.dumps(summary, ensure_ascii=False))
         settled = True
         artifact_status = result["status"]
         return 0 if result["status"] in {"completed", "completed_with_reminder", "observed"} else 2

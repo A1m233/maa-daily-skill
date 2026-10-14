@@ -133,7 +133,7 @@ class ExecutionResultTests(unittest.TestCase):
         output = io.StringIO()
         with (patch.object(sys, "path", [str(Path(runner.__file__).parent), *sys.path]),
               patch.object(runner.subprocess, "run", side_effect=execute), contextlib.redirect_stdout(output)):
-            code = runner.main(["--core-log", str(path), "--artifact-config", str(Path(directory) / "config"),
+            code = runner.main(["--verbose", "--core-log", str(path), "--artifact-config", str(Path(directory) / "config"),
                                 "--", "fake-maa", "run", "test"])
         return code, json.loads(output.getvalue().split(runner.REPORT_PREFIX)[1])
 

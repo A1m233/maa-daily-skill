@@ -77,9 +77,19 @@ python -B <skill-root>/scripts/account_plan.py --file <本机清单.toml>
 python -B <skill-root>/scripts/account_plan.py --file <本机清单.toml> --account A
 ```
 
-无 `--account` 时不输出登录标识；选择后只向本地调用者输出该账号的 `account_name`，不要复制到用户简报或公开证据。解析器始终校验整份清单及引用的执行器配置/药物策略；错别字、缺文件或未知别名非零退出，无部分成功输出。它不调用 MAA、不写文件，也不做原生 task dry-run、设备检查或身份断言。`status=resolved` 只证明静态映射可解析。
+在上述不带 `--preflight` 的解析模式下，无 `--account` 时不输出登录标识；选择后只向本地调用者输出该账号的 `account_name`，不要复制到用户简报或公开证据。解析器始终校验整份清单及引用的执行器配置/药物策略；错别字、缺文件或未知别名非零退出，无部分成功输出。该模式不调用 MAA、不写文件，也不做原生 task dry-run、设备检查或身份断言。`status=resolved` 只证明静态映射可解析。
 
-在首个账号的真实业务前，对本次所有目标分别用选出的 `config`、同一 `profile` 和各自 `alias` 调用 `daily_run.py preflight`，确保后续账号没有已知配置缺口。不要因 A 的预检成功省略 B 的差异配置。预检副作用与限制见[执行器说明](daily-execution.md)。用户只要求其中一个账号时，只预检和运行该目标，不把清单当作扩大授权的依据；汇总也使用本次应跑的列表。
+在首个账号的真实业务前，对本次所有目标做提前配置检查。已有清单时使用：
+
+```text
+python -B <skill-root>/scripts/account_plan.py --file <本机清单.toml> --preflight --maa <exe>
+```
+
+只跑一个目标时加 `--account <别名>`。该模式在**同一次调用、同一个 profile 和服务器游戏日**内，按解析后的配置路径分组；同路径的多个账号只调用一次 `daily_run.py preflight`，不同路径分别检查，即使文件内容相似也不猜测等价。输出各组覆盖的账号别名及结果，不输出登录标识。不带 `--preflight` 仍只读解析，同时列出 `preflight_groups`，不调用 MAA。
+
+这不是游戏执行入口：预检会写本地证据、可能触发 CLI 热更新，但不切号、不连接游戏、不启动业务。失败即停止剩余组；清单、执行配置或药物策略在批次中变化、跨游戏日时不返回整批成功。没有跨调用缓存，下一次调用重新检查。`prepared` 只表示本次配置预检通过，既不证明身份，也不签发运行许可；每个账号的 `daily_run.py run` **仍执行自己的即时预检**。正式配置、profile、原生 task 或资源有变化时，旧组结果失效，先停止派发并重新预检。
+
+没有清单时，可用同样规则对本次已确认映射的不同配置各调用一次 `daily_run.py preflight`，不强制迁移清单。不能因 A 成功省略 B 的差异配置。预检副作用与限制见[执行器说明](daily-execution.md)。用户只要求其中一个账号时，只预检和运行该目标，不把清单当作扩大授权的依据；汇总也使用本次应跑的列表。
 
 执行顺序为：选出 A 的配置 → 官方 startup A 并核验身份 → `daily_run.py run --config <A 的配置> --profile <清单 profile> --account A` → 收尾 → 同样处理 B。`--account` 不会自动读取清单或切号；Agent 必须使用解析结果传入 `--config`。登录标识用参数数组或当前 shell 的正确引用方式传给 CLI，不把清单内容拼成可执行 shell 代码。
 

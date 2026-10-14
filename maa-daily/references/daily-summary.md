@@ -42,7 +42,7 @@ python <skill-root>/scripts/recruit_check.py --report <本轮公招或含公招�
 
 ## 汇总入口
 
-`daily_run.py run` 结束默认直接输出用户简报，另列详细结果位置；运行期间仍可能有原生诊断输出，不把它当最终简报。`daily-result.json`、`brief.json` 与 `brief.md` 保留在本地。需要兼容旧版结束 JSON 输出的调用方显式传 `--output-format json`，此时在最终回复前读取生成的 brief。简报合并全部阶段，不允许奖励的局部 `reminder_required=false` 覆盖基建、公招、理智或阶段缺失。
+`daily_run.py run` 结束默认直接输出用户简报，另列详细结果位置；运行期间默认仅有阶段与执行摘要，完整原生输出和证据不再逐条透传。`daily-result.json`、`brief.json` 与 `brief.md` 保留在本地。需要兼容旧版结束 JSON 输出的调用方显式传 `--output-format json`，此时在最终回复前读取生成的 brief；只有诊断用 `--verbose` 才展开子组件详细输出。简报合并全部阶段，不允许奖励的局部 `reminder_required=false` 覆盖基建、公招、理智或阶段缺失。
 
 ```text
 python <skill-root>/scripts/daily_report.py --daily-result <daily-result.json>

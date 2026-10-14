@@ -92,6 +92,34 @@ class DailyTests(unittest.TestCase):
         self.assertIn('example', stdout.getvalue())
         self.assertEqual(json.loads(stderr.getvalue()), {'status':'incomplete', 'reason':'bad_config'})
 
+    def test_run_still_resolves_every_task_after_prior_preflight(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            policy = root / "medicine.toml"
+            policy.write_text('[expiring_medicine]\nmode="off"\nmedicine_expire_days=1\n', encoding="utf-8")
+            config = {"pre_tasks": ["pre"], "stage_task": "stage", "award_task": "award",
+                      "medicine_policy": str(policy), "priority_goal": "weekly_cap"}
+            tasks = {"pre": [{"type": "Recruit", "params": {}}],
+                     "stage": [{"type": "Fight", "params": {"stage": "AP-5", "times": 0}}],
+                     "award": [{"type": "Award", "params": {"award": True}}]}
+            def runtime(*args, artifacts, **kwargs):
+                return Mock(output=artifacts.path, artifacts=artifacts)
+            with patch.object(daily, "load_config", return_value=config), \
+                 patch.object(daily, "check_install", return_value=root), \
+                 patch.object(daily, "Runtime", side_effect=runtime), \
+                 patch.object(daily, "medicine_preflight") as medicine, \
+                 patch.object(daily.Daily, "resolve", side_effect=lambda name: tasks[name]) as resolve, \
+                 patch.object(daily, "execute_flow", return_value={"status":"completed", "steps":{}}) as execute, \
+                 patch.object(daily, "summarize", return_value={"text":"test summary"}), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                args = ["--config", str(root / "daily.toml"), "--profile", "test", "--account", "A"]
+                self.assertEqual(daily.main(["preflight", *args]), 0)
+                execute.assert_not_called()
+                self.assertEqual(daily.main(["run", *args]), 0)
+            self.assertEqual([c.args[0] for c in resolve.call_args_list], ["pre", "stage", "award"] * 2)
+            self.assertEqual(medicine.call_count, 2)
+            execute.assert_called_once()
+
     def test_fixed_order_even_when_priority_completes(self):
         for status in ("completed", "not_scheduled"):
             ops = Mock(day="2026-09-14", account="example")

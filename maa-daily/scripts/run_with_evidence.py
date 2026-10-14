@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import codecs
+from contextlib import contextmanager
 import datetime as dt
 import hashlib
 import json
@@ -45,10 +46,26 @@ LEVEL_PATTERN = re.compile(r"\]\[(TRC|DBG|INF|WRN|ERR|CRT)\]\[")
 TAIL_WINDOW = 512
 LOG_LANE = re.compile(r"\[(P[^\]]+)\]\[(T[^\]]+)\]")
 CLI_OUTPUT_LIMIT = 256 * 1024
+VERBOSE_ENV = "MAA_DAILY_VERBOSE"
+
+
+@contextmanager
+def output_detail(verbose: bool):
+    """仅向本次组件子进程传递详细输出选择，退出后恢复宿主环境。"""
+    previous = os.environ.get(VERBOSE_ENV)
+    if verbose:
+        os.environ[VERBOSE_ENV] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(VERBOSE_ENV, None)
+        else:
+            os.environ[VERBOSE_ENV] = previous
 
 
 def _execute(command: list[str], env: dict, timeout: float | None = None) -> tuple[int, str, bool]:
-    """流式转发并只保留有界 CLI 原文，不把长战斗输出全部留在内存。"""
+    """始终保留有界 CLI 原文；只有诊断模式才流式转发到调用者。"""
     read_fd, write_fd = os.pipe()
     output = bytearray()
     truncated = False
@@ -61,11 +78,12 @@ def _execute(command: list[str], env: dict, timeout: float | None = None) -> tup
                 if len(output) > CLI_OUTPUT_LIMIT:
                     del output[:-CLI_OUTPUT_LIMIT]
                     truncated = True
-                try:
-                    sys.stdout.write(decoder.decode(chunk))
-                    sys.stdout.flush()
-                except (OSError, UnicodeError, ValueError):
-                    pass
+                if env.get(VERBOSE_ENV) == "1":
+                    try:
+                        sys.stdout.write(decoder.decode(chunk))
+                        sys.stdout.flush()
+                    except (OSError, UnicodeError, ValueError):
+                        pass
     thread = threading.Thread(target=copy, daemon=True)
     thread.start()
     try:
@@ -552,8 +570,23 @@ def _emit_report(report: dict[str, Any], report_file: Path | None, *, exclusive:
             report["report_file_error"] = type(error).__name__
             if report["wrapper_exit_code"] == 0:
                 report["wrapper_exit_code"] = EVIDENCE_UNAVAILABLE_EXIT
-    payload = json.dumps(report, ensure_ascii=False, sort_keys=True)
-    print(f"{REPORT_PREFIX}{payload}", flush=True)
+    if os.environ.get(VERBOSE_ENV) == "1":
+        payload = json.dumps(report, ensure_ascii=False, sort_keys=True)
+        print(f"{REPORT_PREFIX}{payload}", flush=True)
+    else:
+        evidence = report.get("evidence", {})
+        summary = {"child_exit_code": report.get("child_exit_code"),
+                   "wrapper_exit_code": report["wrapper_exit_code"],
+                   "execution": evidence.get("execution", {}).get("status", "unknown"),
+                   "evidence": evidence.get("state", "unavailable"),
+                   "internal_errors": len(evidence.get("internal_error_lines", [])),
+                   "subtask_errors": len(evidence.get("subtask_error_lines", [])),
+                   "retried": report.get("recovery", {}).get("retried", False),
+                   "business_result": "not_evaluated"}
+        for key in ("runner_error", "report_file_error"):
+            if report.get(key):
+                summary[key] = report[key]
+        print("MAA_EVIDENCE_SUMMARY=" + json.dumps(summary, ensure_ascii=False), flush=True)
     return int(report["wrapper_exit_code"])
 
 
@@ -575,6 +608,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Override artifact config discovery for custom commands or isolated tests.")
     parser.add_argument("--inspect-report", type=Path,
                         help="只读校验原报告日志区间并复核执行边界，不启动 MAA、不改写报告")
+    parser.add_argument("--verbose", action="store_true", help="诊断用：转发原生输出及完整报告；默认只输出摘要和报告路径")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser
 
@@ -645,6 +679,11 @@ def _run_command(command: list[str], core_log: Path | None, started_at: str,
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    with output_detail(args.verbose):
+        return _main(args, parser)
+
+
+def _main(args, parser) -> int:
     if args.inspect_report is not None:
         if (args.command or args.core_log is not None or args.report_file is not None
                 or args.artifact_config is not None):

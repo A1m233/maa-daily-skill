@@ -73,7 +73,7 @@ python <skill-root>/scripts/run_with_evidence.py \
   -- maa run <task> --profile <profile> --batch
 ```
 
-runner 使用待执行命令的同一个 `maa` 可执行文件调用 `maa dir log --batch`，在运行前后记录 `asst.log` 的文件大小和行号，再输出以 `MAA_EVIDENCE_JSON=` 开头的单行 JSON。报告默认写入[受管产物目录](artifacts.md)，无需每轮指定临时路径；上例的 `--report-file` 仅用于显式新文件，包外已有文件拒绝覆盖。只有当前环境已经证明 MaaCore 日志位于另一个精确路径时，才使用 `--core-log <path>` 覆盖自动发现；不要把示例或旧会话路径写死。
+runner 使用待执行命令的同一个 `maa` 可执行文件调用 `maa dir log --batch`，在运行前后记录 `asst.log` 的文件大小和行号。默认只输出 `MAA_EVIDENCE_REPORT=` 路径和 `MAA_EVIDENCE_SUMMARY=` 精简执行摘要；完整报告默认写入[受管产物目录](artifacts.md)，无需每轮指定临时路径。读取完整报告的调用方使用该文件；需要兼容旧 stdout 中 `MAA_EVIDENCE_JSON=` 的调用方在 `--` 前显式加 `--verbose`，此时才展开原生输出和完整报告。上例的 `--report-file` 仅用于显式新文件，包外已有文件拒绝覆盖。只有当前环境已经证明 MaaCore 日志位于另一个精确路径时，才使用 `--core-log <path>` 覆盖自动发现；不要把示例或旧会话路径写死。
 
 MAA 的[日志实现（v6.17.1）](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/src/MaaCore/Utils/Logger.hpp)在约 64 MiB 时把 `asst.log` 重命名为同目录 `asst.bak.log`。runner 支持运行中一次完整轮转：验证备份文件身份与运行前完整前缀哈希，再按顺序读取旧文件本轮尾段和新文件头段。报告仍为 `state=bounded`，增加 `rotation_recovered`、`rotation_anchor` 和两个带区间、物理起始行及哈希的 `segments`；顶层起止大小仍是原始观测值，不可再把两者之差当作拼接长度。顶层回调行号按首段起始行连续计数，跨段定位需按 segments 映射。总证据区间上限为 64 MiB。
 
@@ -87,7 +87,7 @@ MAA 的[日志实现（v6.17.1）](https://github.com/MaaAssistantArknights/MaaA
 - `TaskChainStart`、`TaskChainCompleted`、`TaskChainError`、`SubTaskError` 的次数和行号；
 - MaaCore `ERR` / `CRT` 行号，以及 `SubTaskExtraInfo.what` 的类型计数；原始 `subtask_error_lines` 完整保留。`evidence.execution` 单独输出任务链执行状态及边界问题，不按内部节点名称过滤错误；`evidence.diagnostics.client_update` 提供下文的客户端更新诊断，不改变执行结论。
 
-runner 不另存完整命令参数或 MaaCore 日志副本，`business_result` 固定为 `not_evaluated`。CLI 的 stdout/stderr 合流转发，并仅保留最多 256 KiB 尾部；其中可能包含原生诊断输出的本机信息，只存受管本地产物，不提交仓库。截断输出不能作为自动重试或选关解析依据。零退出码仍不证明账号、购买、领取、招募、基建或资源消耗等后置条件成立；Agent 必须按报告给出的本轮日志范围继续核对业务证据。
+runner 不另存完整命令参数或 MaaCore 日志副本，`business_result` 固定为 `not_evaluated`。CLI 的 stdout/stderr 合流采集，报告仍保留最多 256 KiB 尾部；默认不透传给调用者，但不改变原生日志级别、证据采集、解析或退出码。只有 `--verbose` 才同时流式转发；详细输出选择会在同一次日常的子组件间传递，调用结束恢复，不修改系统环境。其中可能包含原生诊断输出的本机信息，只存受管本地产物，不提交仓库。截断输出不能作为自动重试或选关解析依据。零退出码仍不证明账号、购买、领取、招募、基建或资源消耗等后置条件成立；Agent 必须按报告给出的本轮日志范围继续核对业务证据。
 
 报告 schema 2 采用 `execution-boundary-v2`：子进程非零时保留其退出码；子进程为零但日志不可界定、回调无法解析、任务链身份/生命周期有歧义、没有任务链或缺少终态时返回 `74`；出现 `TaskChainError`、`TaskChainStopped`、`InternalError` 或 `InitFailed` 时返回 `75`。仅有 `SubTaskError` 或内部 ERR/CRT 不会自动改写完整的任务链执行结果，但全部保留用于业务核验。零退出码只代表执行边界完整，绝不代表业务通过。任一非零结果都停止后续 startup 和业务进程；仅可按[客户端更新检查](#客户端更新检查)的条件进入一次无点击诊断，不据此继续业务。宿主显示笼统失败时读取 `wrapper_exit_code`。报告只写本地临时或调试目录，不写入 Skill 仓库。
 

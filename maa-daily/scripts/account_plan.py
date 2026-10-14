@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""只读解析本机账号→日常配置清单；不调用 MAA，也不证明登录身份。"""
+"""解析本机账号配置清单；可选按共用配置分组预检，不切号或执行游戏业务。"""
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 from pathlib import Path
 import re
 import sys
 import tomllib
 
-from daily_run import load_config
+from daily_run import load_config, main as daily_main
+from reward_check import game_day
 
 
 def text_field(value, field: str, *, token: bool = False) -> str:
@@ -70,10 +72,58 @@ def load_plan(path: Path) -> dict:
     return {"profile": profile, "client": client, "accounts": resolved}
 
 
+def preflight_groups(entries: list[dict]) -> list[dict]:
+    """只合并同一规范路径，不合并内容相似但独立的配置。"""
+    groups = {}
+    for entry in entries:
+        key = Path(entry["config"]).resolve()
+        groups.setdefault(key, {"config": str(key), "accounts": []})["accounts"].append(entry["alias"])
+    return list(groups.values())
+
+
+def preflight_plan(path: Path, plan: dict, entries: list[dict], maa: str, *, verbose=False) -> dict:
+    """本次调用内去重；不缓存或签发运行许可，run 仍自行即时预检。"""
+    day = game_day(dt.datetime.now(dt.timezone.utc))
+    groups = [{**g, "status": "pending"} for g in preflight_groups(entries)]
+    result = {"status": "incomplete", "game_day": day, "profile": plan["profile"],
+              "accounts": [e["alias"] for e in entries], "groups": groups,
+              "game_operated": False, "identity_verified": False, "run_preflight_required": True}
+    # 清单和执行配置/药物策略若在本批检查期间改变，不返回成功。
+    paths = {path.resolve()}
+    for group in groups:
+        config = Path(group["config"])
+        paths.update((config, Path(load_config(config)["medicine_policy"])))
+    snapshots = {p: p.read_bytes() for p in paths}
+    def unchanged():
+        if game_day(dt.datetime.now(dt.timezone.utc)) != day:
+            raise ValueError("game_day_changed")
+        if any(p.read_bytes() != data for p, data in snapshots.items()) or load_plan(path) != plan:
+            raise ValueError("account_plan_changed_during_preflight")
+    try:
+        for group in groups:
+            unchanged()
+            print("预检账号配置组：" + ", ".join(group["accounts"]), flush=True)
+            code = daily_main(["preflight", "--config", group["config"], "--maa", maa,
+                               "--profile", plan["profile"], "--account", group["accounts"][0],
+                               *(["--verbose"] if verbose else [])])
+            group.update(status="prepared" if code == 0 else "failed", exit_code=code)
+            if code:
+                result["reason"] = "group_preflight_failed"
+                return result
+            unchanged()
+        result["status"] = "prepared"
+    except (OSError, ValueError, TypeError) as error:
+        result["reason"] = str(error) if type(error) is ValueError else "preflight_input_unreadable"
+    return result
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--file", type=Path, required=True, help="本机账号清单 TOML")
     parser.add_argument("--account", help="精确别名；只在选中时输出该账号的本地登录标识")
+    parser.add_argument("--preflight", action="store_true", help="对所选目标按配置路径去重后执行提前预检；有本地写入和可能的热更新，不操作游戏")
+    parser.add_argument("--maa", default="maa", help="仅 --preflight 使用的 maa-cli 路径")
+    parser.add_argument("--verbose", action="store_true", help="预检诊断用详细输出")
     args = parser.parse_args(argv)
     try:
         plan = load_plan(args.file)
@@ -83,9 +133,13 @@ def main(argv=None) -> int:
                 raise ValueError("account_not_found")
         else:
             entries = [{k: v for k, v in item.items() if k != "account_name"} for item in plan["accounts"]]
+        if args.preflight:
+            result = preflight_plan(args.file, plan, entries, args.maa, verbose=args.verbose)
+            print(json.dumps(result, ensure_ascii=False))
+            return 0 if result["status"] == "prepared" else 2
         print(json.dumps({"status": "resolved", "profile": plan["profile"], "client": plan["client"],
                           "accounts": entries, "identity_verified": False,
-                          "tasks_validated": False}, ensure_ascii=False))
+                          "tasks_validated": False, "preflight_groups": preflight_groups(entries)}, ensure_ascii=False))
         return 0
     except (OSError, ValueError, TypeError) as error:
         reason = str(error) if type(error) is ValueError else "account_plan_unreadable_or_invalid"

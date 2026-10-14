@@ -19,7 +19,7 @@ from infrast_check import inspect_report as inspect_infrast
 from medicine_policy import load_policy
 from medicine_sanity import preflight as medicine_preflight
 from reward_check import check_install, game_day, scan_once
-from run_with_evidence import classify_execution, run_dry
+from run_with_evidence import classify_execution, run_dry, output_detail
 from stage_runtime import normalize_stage
 from recruit_check import inspect_report as inspect_recruit
 from daily_report import summarize
@@ -140,6 +140,7 @@ def execute_flow(ops, save) -> dict:
     try:
         for current in STEPS:
             ops.check_day()
+            print(f"日常阶段：{current}", flush=True)
             result["steps"][current] = {"status": "running"}
             save(result)
             value = getattr(ops, current)()
@@ -187,6 +188,7 @@ class Daily:
         self.check_day()
 
     def resolve(self, name):
+        print(f"预检任务：{name}", flush=True)
         # Reject ambiguous alternative files before letting maa choose one.
         files = [self.runtime.config / "tasks" / (name + ext) for ext in (".toml", ".json", ".yaml", ".yml")]
         if sum(p.is_file() for p in files) != 1:
@@ -309,7 +311,13 @@ def main(argv=None):
     parser.add_argument("--output-dir", type=Path, help="可选输出根；省略时使用固定受管产物目录")
     parser.add_argument("--output-format", choices=["brief", "json"], default="brief",
                         help="run 的结束输出：默认用户简报；json 保留旧版详细结果输出，退出码不变")
+    parser.add_argument("--verbose", action="store_true", help="诊断用：展开子组件原生输出和完整证据 JSON")
     args = parser.parse_args(argv)
+    with output_detail(args.verbose):
+        return _main(args)
+
+
+def _main(args):
     from artifacts import ArtifactError, ArtifactRun
     lock = None
     artifacts = None
@@ -323,8 +331,9 @@ def main(argv=None):
         lock = lock_path.open("x", encoding="utf-8")
         lock.write(json.dumps({"pid": os.getpid(), "account": args.account})); lock.flush()
         artifacts = ArtifactRun.begin(root, args.output_dir, "daily-" + args.mode, prefix="daily-")
+        print("日常证据目录：" + str(artifacts.path), flush=True)
+        print("日常预检开始", flush=True)
         ops = Daily(config, args.maa, args.profile, args.account, args.output_dir, artifacts=artifacts)
-        print("日常证据目录：" + str(ops.output), flush=True)
         if args.mode == "preflight":
             result = {"status": "prepared", "game_day": ops.day, "stage": ops.stage, "game_operated": False}
         else:

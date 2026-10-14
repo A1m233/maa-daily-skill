@@ -96,6 +96,64 @@ class AccountPlanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.load()
 
+    def test_grouped_preflight_shared_distinct_and_selected_configs(self):
+        for shared, selected in ((True, None), (False, None), (True, "B")):
+            with self.subTest(shared=shared, selected=selected):
+                data = copy.deepcopy(self.data)
+                if shared:
+                    data["accounts"][1]["config"] = "a/../a/daily.toml"
+                self.load(data)
+                with patch.object(account_plan, "daily_main", return_value=0) as run:
+                    code, out, err = self.cli("--preflight", "--maa", "fake-maa",
+                                              *(["--account", selected] if selected else []))
+                self.assertEqual((code, err), (0, ""))
+                result = json.loads(out.splitlines()[-1])
+                self.assertEqual(result["status"], "prepared")
+                self.assertFalse(result["game_operated"])
+                self.assertFalse(result["identity_verified"])
+                self.assertTrue(result["run_preflight_required"])
+                self.assertEqual(run.call_count, 1 if shared else 2)
+                self.assertEqual(result["accounts"], ["B"] if selected else ["A", "B"])
+                self.assertNotIn("本机标识", out)
+                for call in run.call_args_list:
+                    self.assertEqual(call.args[0][0], "preflight")
+                    self.assertIn("fake-maa", call.args[0])
+
+    def test_preflight_never_caches_between_invocations_and_stops_on_failure(self):
+        self.load()
+        with patch.object(account_plan, "daily_main", return_value=0) as run:
+            self.assertEqual(self.cli("--preflight")[0], 0)
+            self.assertEqual(self.cli("--preflight")[0], 0)
+            self.assertEqual(run.call_count, 4)
+        with patch.object(account_plan, "daily_main", return_value=2) as run:
+            code, out, _ = self.cli("--preflight")
+        self.assertEqual(code, 2)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual([g["status"] for g in json.loads(out.splitlines()[-1])["groups"]], ["failed", "pending"])
+
+    def test_preflight_rejects_input_change_and_game_day_change(self):
+        self.load()
+        original = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        for change in ("config", "medicine", "manifest", "day"):
+            with self.subTest(change=change):
+                for p, data in original.items():
+                    p.write_bytes(data)
+                plan = self.load()
+                def check(*args):
+                    targets = {"config": self.root / "a/daily.toml", "medicine": self.root / "a/medicine.toml",
+                               "manifest": self.path}
+                    if change in targets:
+                        p = targets[change]
+                        p.write_bytes(p.read_bytes() + b"\n# changed\n")
+                    return 0
+                with patch.object(account_plan, "daily_main", side_effect=check) as run, \
+                     patch.object(account_plan, "game_day", side_effect=["2026-10-14", "2026-10-14", "2026-10-15"] if change == "day" else lambda _: "2026-10-14"), \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    result = account_plan.preflight_plan(self.path, plan, plan["accounts"], "fake-maa")
+                self.assertEqual(result["status"], "incomplete")
+                self.assertEqual(run.call_count, 1)
+                self.assertEqual(result["groups"][1]["status"], "pending")
+
     def write_template(self):
         text = (ASSETS / "accounts.example.toml").read_text(encoding="utf-8")
         text = text.replace('"daily-execution.toml"', '"a/daily.toml"')

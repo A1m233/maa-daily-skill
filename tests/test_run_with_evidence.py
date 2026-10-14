@@ -161,7 +161,7 @@ class EvidenceRunnerTests(unittest.TestCase):
         output, errors = io.StringIO(), io.StringIO()
         with (mock.patch.object(RUNNER_MODULE.subprocess, "run", side_effect=execute),
               contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors)):
-            code = RUNNER_MODULE.main(["--core-log", str(log), *(extra or []), "--", "fake-maa", "run"])
+            code = RUNNER_MODULE.main(["--verbose", "--core-log", str(log), *(extra or []), "--", "fake-maa", "run"])
         reports = [line.removeprefix(REPORT_PREFIX) for line in output.getvalue().splitlines()
                    if line.startswith(REPORT_PREFIX)]
         self.last_output = output.getvalue()
@@ -316,7 +316,8 @@ class EvidenceRunnerTests(unittest.TestCase):
             )
 
         self.assertEqual(0, result.returncode)
-        self.assertIn(REPORT_PREFIX, result.stdout)
+        self.assertIn("MAA_EVIDENCE_SUMMARY=", result.stdout)
+        self.assertNotIn(REPORT_PREFIX, result.stdout)
         self.assertEqual(0, report["child_exit_code"])
         self.assertEqual(0, report["wrapper_exit_code"])
         self.assertEqual("not_evaluated", report["business_result"])

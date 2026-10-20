@@ -70,6 +70,33 @@ class DailyChecksTests(unittest.TestCase):
             self.assertFalse((root / "resource").exists())
             self.assertEqual("user task", task.read_text(encoding="utf-8"))
 
+    def test_medicine_recovery_upgrade_adds_nodes_without_overwriting_existing(self):
+        import medicine_sanity
+        from types import SimpleNamespace
+        new_keys = {"MaaDailyMedicine@" + name for name in (
+            "ScanRecoveryOpen", "ScanRecoveryDialog", "ScanStoneDialog", "ScanStoneClose")}
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory)
+            checks.prepare(config)
+            target = config / "resource/tasks/tasks.json"
+            current = json.loads(target.read_text(encoding="utf-8"))
+            old = {k: v for k, v in current.items() if k not in new_keys}
+            target.write_text(json.dumps(old), encoding="utf-8")
+            before = target.read_bytes()
+            with self.assertRaisesRegex(ValueError, "medicine_resource_missing_or_changed"):
+                medicine_sanity.preflight(SimpleNamespace(config=config))
+            checks.prepare(config)
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8")), current)
+            self.assertTrue(any(p.read_bytes() == before for p in target.parent.glob("*.bak-*")))
+            medicine_sanity.preflight(SimpleNamespace(config=config))
+            self.assertEqual(checks.prepare(config), [])
+            current["MaaDailyMedicine@ScanStoneClose"]["specificRect"] = [1000, 500, 200, 150]
+            target.write_text(json.dumps(current), encoding="utf-8")
+            before = target.read_bytes()
+            with self.assertRaisesRegex(ValueError, "resource conflict"):
+                checks.prepare(config)
+            self.assertEqual(target.read_bytes(), before)
+
     def test_prepare_accepts_line_endings_without_rewriting_existing_files(self):
         for packaged_eol in (b"\n", b"\r\n"):
             for deployed_eol in (b"\n", b"\r\n"):

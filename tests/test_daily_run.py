@@ -17,8 +17,10 @@ import daily_run as daily
 class DailyTests(unittest.TestCase):
     def test_medicine_unknown_continues_only_after_page_recovery(self):
         import subprocess
-        for page in ("prepared", "unknown"):
-            with self.subTest(page=page), tempfile.TemporaryDirectory() as directory:
+        import medicine_sanity
+        from test_medicine_sanity import MedicineTests, report
+        for page, stone in ((p, s) for p in ("prepared", "unknown") for s in (False, True)):
+            with self.subTest(page=page, stone=stone), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 ops = object.__new__(daily.Daily)
                 ops.output, ops.stage, ops.policy = root, "AP-5", root / "policy.toml"
@@ -28,10 +30,17 @@ class DailyTests(unittest.TestCase):
                 ops.runtime.artifacts.environment.return_value = {}
                 target = root / "sanity/drain-fixture"
                 target.mkdir(parents=True)
+                medicine = {"status": "unknown", "cleanup_status": "closed"}
+                if stone:
+                    evidence = report(directory, MedicineTests().recovery_body(stone=True, probe=page == "prepared"))
+                    if page != "prepared":
+                        evidence.update(child_exit_code=1, wrapper_exit_code=1)
+                    medicine = medicine_sanity.read_session(evidence, "AP-5", 1, "ScanRecoveryDialog")
+                    self.assertEqual(medicine["end_at"], page)
                 (target / "result.json").write_text(json.dumps({
                     "status": "completed_with_reminder", "stage": "AP-5", "remaining_sanity": 5,
                     "completed_runs": 6, "end_at": page,
-                    "medicine_check": {"status": "unknown", "cleanup_status": "closed"},
+                    "medicine_check": medicine,
                     "reminder_required": True}), encoding="utf-8")
                 ops.check_day = Mock()
                 ops.pre = Mock(return_value={"status":"completed"})

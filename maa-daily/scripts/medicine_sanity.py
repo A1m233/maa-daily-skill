@@ -105,9 +105,16 @@ def read_session(report: dict, stage: str, days: int, entry: str) -> dict:
                 or chains[-1][0] not in {"TaskChainCompleted", "TaskChainError", "TaskChainStopped"}
                 or chains[-1][1:] != chains[0][1:]):
             raise ValueError("ambiguous_medicine_session")
-        expected = (["ScanOpen"] if entry == "ScanOpen" else []) + [
-            "ScanDialog", "ScanExpiryA", "ScanExpiryB", "ScanClose",
-            "VerifyStage", "StagePage", "Sanity", "SanityConfirm"]
+        suffix = ["VerifyStage", "StagePage", "Sanity", "SanityConfirm"]
+        medicine = ["ScanDialog", "ScanExpiryA", "ScanExpiryB", "ScanClose"]
+        if entry in {"ScanRecoveryOpen", "ScanRecoveryDialog"}:
+            paths = [[entry] + branch + suffix for branch in (
+                medicine, ["ScanStoneDialog", "ScanStoneClose"])]
+        elif entry in {"ScanOpen", "ScanDialog"}:
+            # 历史报告仍可只读复核；新执行使用可识别两种恢复页的入口。
+            paths = [(["ScanOpen"] if entry == "ScanOpen" else []) + medicine + suffix]
+        else:
+            raise ValueError("unsupported_medicine_session_entry")
         completed = []
         active = False
         failed = False
@@ -126,8 +133,10 @@ def read_session(report: dict, stage: str, days: int, entry: str) -> dict:
                 continue
             details = value.get("details", {})
             name = details.get("task", "").split("@")[-1]
-            action = "ClickSelf" if name == "ScanOpen" else "ClickRect" if name == "ScanClose" else "DoNothing"
-            if (failed or len(completed) >= len(expected) or name != expected[len(completed)]
+            action = ("ClickSelf" if name in {"ScanOpen", "ScanRecoveryOpen"} else
+                      "ClickRect" if name in {"ScanClose", "ScanStoneClose"} else "DoNothing")
+            candidates = [p for p in paths if p[:len(completed) + 1] == completed + [name]]
+            if (failed or not candidates
                     or details.get("action") != action or value.get("first") != [MP + entry]):
                 raise ValueError("unexpected_medicine_session_action")
             if kind == "SubTaskCompleted":
@@ -147,7 +156,13 @@ def read_session(report: dict, stage: str, days: int, entry: str) -> dict:
                     result["scan_status"] = "completed"
                 except ValueError as error:
                     result["reason"] = str(error)
-        if "ScanClose" in completed:
+        if "ScanStoneDialog" in completed:
+            result.update(dialog_type="stone", reason="stone_recovery_dialog",
+                          scan_status="not_available",
+                          message="当前为源石恢复界面；未扫描药物库存，已禁止确认恢复。")
+        elif "ScanDialog" in completed:
+            result["dialog_type"] = "medicine"
+        if "ScanClose" in completed or "ScanStoneClose" in completed:
             result["cleanup_status"] = "closed"
         if report.get("child_exit_code") == report.get("wrapper_exit_code") == 0:
             result["execution_status"] = "completed"
@@ -168,7 +183,7 @@ def scan(runtime, stage: str, days: int, *, dialog_open: bool = False, cost: int
         sanity = read_probe(runtime.run([probe_task(stage)], "medicine-precondition"), stage)
         if sanity >= stage_cost(stage, cost):
             raise ValueError("medicine_scan_requires_below_one_run")
-    entry = "ScanDialog" if dialog_open else "ScanOpen"
+    entry = "ScanRecoveryDialog" if dialog_open else "ScanRecoveryOpen"
     try:
         report = runtime.run([{"type": "Custom", "params": {"task_names": [MP + entry]}}], "medicine-check")
     except ValueError as error:

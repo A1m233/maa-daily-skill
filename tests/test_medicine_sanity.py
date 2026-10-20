@@ -78,6 +78,60 @@ class MedicineTests(unittest.TestCase):
             unknown = med.read_session(report(directory, self.session_body(text="7天")), "AP-5", 1, "ScanDialog")
             self.assertEqual((unknown["status"], unknown["end_at"]), ("unknown", "prepared"))
 
+    def recovery_body(self, *, entry="ScanRecoveryDialog", stone=False, close=True, probe=True):
+        body = self.session_body(close=close, probe=probe,
+                                 terminal="TaskChainCompleted" if probe else "TaskChainError")
+        if stone:
+            # 源石分支不执行药物 OCR，也不能把没有 OCR 当成零库存。
+            body = "".join(line for line in body.splitlines(keepends=True)
+                           if "ScanExpiry" not in line)
+            body = body.replace('"task": "ScanDialog"', '"task": "ScanStoneDialog"')
+            body = body.replace('"task": "ScanClose"', '"task": "ScanStoneClose"')
+        body = body.replace(med.MP + "ScanDialog", med.MP + entry)
+        head, rest = body.split("\n", 1)
+        return head + "\n" + event("SubTaskCompleted", taskchain="Custom", taskid=1,
+            first=[med.MP + entry], details={"task": entry,
+                "action": "ClickSelf" if entry == "ScanRecoveryOpen" else "DoNothing"}) + rest
+
+    def test_recovery_branches_keep_inventory_and_page_results_separate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for entry in ("ScanRecoveryOpen", "ScanRecoveryDialog"):
+                for stone in (False, True):
+                    value = med.read_session(report(directory, self.recovery_body(entry=entry, stone=stone)),
+                                             "AP-5", 1, entry)
+                    self.assertEqual(value["end_at"], "prepared")
+                    self.assertEqual(value["cleanup_status"], "closed")
+                    self.assertEqual(value["dialog_type"], "stone" if stone else "medicine")
+                    self.assertEqual(value["status"], "unknown" if stone else "detected")
+                    self.assertEqual(value["scan_status"], "not_available" if stone else "completed")
+                    self.assertTrue(value["reminder_required"])
+                    self.assertFalse(value["inventory_complete"])
+
+    def test_stone_close_and_return_failures_never_claim_safe_page(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for close in (False, True):
+                value = report(directory, self.recovery_body(stone=True, close=close, probe=False))
+                value.update(child_exit_code=1, wrapper_exit_code=1)
+                result = med.read_session(value, "AP-5", 1, "ScanRecoveryDialog")
+                self.assertEqual(result["status"], "unknown")
+                self.assertEqual(result["end_at"], "unknown")
+                self.assertEqual(result["cleanup_status"], "closed" if close else "unknown")
+                self.assertEqual(result["execution_status"], "failed")
+
+    def test_recovery_rejects_mixed_branches_confirmation_and_unknown_dialog(self):
+        with tempfile.TemporaryDirectory() as directory:
+            body = self.recovery_body(stone=True)
+            for bad in (body.replace('"ScanStoneClose"', '"ScanClose"'),
+                        body.replace('"ScanStoneClose"', '"StoneConfirm"'),
+                        body.replace('"ClickRect"', '"ClickSelf"'),
+                        body.replace('"ScanStoneDialog"', '"UnknownDialog"')):
+                value = med.read_session(report(directory, bad), "AP-5", 1, "ScanRecoveryDialog")
+                self.assertEqual(value["end_at"], "unknown")
+                self.assertEqual(value["cleanup_status"], "unknown")
+            wrong_stage = med.read_session(report(directory, body), "CE-6", 1, "ScanRecoveryDialog")
+            self.assertEqual(wrong_stage["cleanup_status"], "closed")
+            self.assertEqual(wrong_stage["end_at"], "unknown")
+
     def test_session_rejects_foreign_actions_wrong_stage_and_changed_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             body = self.session_body()
@@ -97,11 +151,13 @@ class MedicineTests(unittest.TestCase):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as directory:
             runtime = Mock(output=Path(directory))
-            value = report(directory, self.session_body(close=False, probe=False, terminal="TaskChainError"))
+            value = report(directory, self.recovery_body(close=False, probe=False))
             value.update(child_exit_code=1, wrapper_exit_code=1)
             runtime.run.side_effect = ProcessUnverified("runner_failed: 1", value)
             result = med.scan(runtime, "AP-5", 1, dialog_open=True)
             runtime.run.assert_called_once()
+            self.assertEqual(runtime.run.call_args.args[0][0]["params"]["task_names"],
+                             [med.MP + "ScanRecoveryDialog"])
             self.assertEqual(result["status"], "detected")
             self.assertEqual(result["cleanup_status"], "unknown")
             self.assertTrue((Path(directory)/"medicine-check.json").is_file())
@@ -294,12 +350,25 @@ class MedicineTests(unittest.TestCase):
             self.assertTrue(all(n in nodes or n == "MaaDailyCheck@VerifyStage" for n in spec["next"]))
             self.assertNotIn("sub", spec)
             self.assertNotIn("onErrorNext", spec)
-            if name.endswith(("@Open", "@ScanOpen")):
+            if name.endswith(("@Open", "@ScanOpen", "@ScanRecoveryOpen")):
                 self.assertEqual(spec["action"], "ClickSelf")
-            elif name.endswith(("@Close", "@ScanClose")):
+            elif name.endswith(("@Close", "@ScanClose", "@ScanStoneClose")):
                 self.assertEqual(spec["action"], "ClickRect")
+                self.assertEqual(spec["algorithm"], "MatchTemplate")
+                self.assertEqual(spec["specificRect"], [0, 200, 300, 400])
             else:
                 self.assertEqual(spec["action"], "DoNothing")
+
+    def test_recovery_graph_has_only_two_guarded_branches(self):
+        nodes = json.loads((Path(med.__file__).resolve().parents[1] /
+                            "assets/medicine-check/tasks.json").read_text(encoding="utf-8"))
+        for entry in ("ScanRecoveryOpen", "ScanRecoveryDialog"):
+            self.assertEqual(nodes[med.MP + entry]["next"],
+                             [med.MP + "ScanDialog", med.MP + "ScanStoneDialog"])
+        for node in ("ScanStoneDialog", "ScanStoneClose"):
+            self.assertEqual(nodes[med.MP + node]["template"], ["UseStone.png", "NoStone.png"])
+            self.assertEqual(nodes[med.MP + node]["templThreshold"], .8)
+        self.assertEqual(nodes[med.MP + "ScanStoneClose"]["next"], ["MaaDailyCheck@VerifyStage"])
 
 
 if __name__ == "__main__":

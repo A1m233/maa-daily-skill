@@ -1,4 +1,23 @@
 {
+  "MaaDailyMedicine@ScanRecoveryOpen": {
+    "algorithm": "OcrDetect", "text": ["开始行动"], "fullMatch": true,
+    "roi": [1010, 625, 260, 61], "action": "ClickSelf", "postDelay": 3000,
+    "maxTimes": 1, "next": ["MaaDailyMedicine@ScanDialog", "MaaDailyMedicine@ScanStoneDialog"]
+  },
+  "MaaDailyMedicine@ScanRecoveryDialog": {
+    "algorithm": "JustReturn", "action": "DoNothing", "maxTimes": 1,
+    "next": ["MaaDailyMedicine@ScanDialog", "MaaDailyMedicine@ScanStoneDialog"]
+  },
+  "MaaDailyMedicine@ScanStoneDialog": {
+    "algorithm": "MatchTemplate", "template": ["UseStone.png", "NoStone.png"], "templThreshold": 0.8,
+    "roi": [600, 130, 550, 420], "action": "DoNothing", "maxTimes": 1,
+    "next": ["MaaDailyMedicine@ScanStoneClose"]
+  },
+  "MaaDailyMedicine@ScanStoneClose": {
+    "algorithm": "MatchTemplate", "template": ["UseStone.png", "NoStone.png"], "templThreshold": 0.8,
+    "roi": [600, 130, 550, 420], "action": "ClickRect", "specificRect": [0, 200, 300, 400],
+    "postDelay": 1000, "maxTimes": 1, "next": ["MaaDailyCheck@VerifyStage"]
+  },
   "MaaDailyMedicine@Open": {
     "algorithm": "OcrDetect", "text": ["开始行动"], "fullMatch": true,
     "roi": [1010, 625, 260, 61], "action": "ClickSelf", "postDelay": 3000,

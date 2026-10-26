@@ -204,11 +204,46 @@ class DrainTests(unittest.TestCase):
             runtime = factory.return_value
             runtime.artifacts.finish.return_value = {"warnings": []}
             runtime.output = Path(directory)
+            runtime.reports = [{"report_file": str(Path(directory) / "navigation.json")}]
             runtime.run.side_effect = ValueError("runner_failed: 1")
             self.assertEqual(drain.main(["run", "--stage", "AP-5", "--profile", "test",
                                         "--output-dir", directory]), 2)
             self.assertEqual(runtime.run.call_count, 1)
             self.assertEqual(runtime.run.call_args.args[1], "navigation")
+            result = json.loads((runtime.output / "result.json").read_text(encoding="utf-8"))
+            self.assertEqual(result["status"], "stopped")
+            self.assertEqual(result["reason"], "runner_failed: 1")
+            self.assertEqual(result["failed_phase"], "navigation")
+            self.assertEqual(result["process_report_files"], [str(Path(directory) / "navigation.json")])
+            self.assertIsNone(result["remaining_sanity"])
+            self.assertEqual(result["end_at"], "unknown")
+            self.assertNotIn("completed_runs", result)
+
+    def test_preflight_failure_is_persisted_without_navigation(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(drain, "Runtime") as factory, \
+                patch("medicine_sanity.preflight", side_effect=ValueError("resource_missing")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            runtime = factory.return_value
+            runtime.output, runtime.reports = Path(directory), []
+            runtime.artifacts.finish.return_value = {"warnings": []}
+            self.assertEqual(drain.main(["run", "--stage", "LS-6", "--profile", "test"]), 2)
+            runtime.run.assert_not_called()
+            result = json.loads((runtime.output / "result.json").read_text(encoding="utf-8"))
+            self.assertEqual(result["reason"], "resource_missing")
+            self.assertEqual(result["failed_phase"], "preflight")
+
+    def test_result_write_failure_keeps_original_error_in_stdout(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(drain, "Runtime") as factory, \
+                patch("medicine_sanity.preflight", side_effect=ValueError("resource_missing")), \
+                patch.object(drain, "write_json", side_effect=OSError("read_only")), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            runtime = factory.return_value
+            runtime.output, runtime.reports = Path(directory), []
+            runtime.artifacts.finish.return_value = {"warnings": []}
+            self.assertEqual(drain.main(["run", "--stage", "LS-6", "--profile", "test"]), 2)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["reason"], "resource_missing")
+            self.assertEqual(result["result_write_error"], "read_only")
 
     def test_old_deployment_rejected_before_any_game_process(self):
         with tempfile.TemporaryDirectory() as directory:

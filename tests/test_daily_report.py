@@ -47,12 +47,14 @@ class ReportTests(unittest.TestCase):
                 event('SubTaskExtraInfo', what='RecruitTagsRefreshed', details={'count': 1}),
                 event('SubTaskExtraInfo', what='RecruitTagsDetected', details={'tags': ['tag-c']}),
                 event('SubTaskCompleted', details={'task': 'RecruitConfirm', 'action': 'ClickSelf'}),
+                event('SubTaskStart', first=['RecruitConfirm'], details={'task':'RecruitFlag', 'action':'Stop'}),
                 event('TaskChainCompleted')]
 
     def test_preserved_tags_and_refresh_rounds_not_slots(self):
         r = self.inspect(self.rounds())
         self.assertEqual(r['status'], 'evaluated')
         self.assertEqual(r['confirmed_actions'], 1)
+        self.assertEqual(r['confirmed_recruitments'], 1)
         self.assertEqual(r['refresh_actions'], 2)
         self.assertEqual(len(r['pending']), 1)
         self.assertEqual(r['pending'][0]['reason'], 'maa_preserved_tag')
@@ -76,6 +78,38 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(self.inspect(lines + [event('TaskChainStart')])['status'], 'unknown')
         lines.insert(-1, event('SubTaskCompleted', details={'task': 'RecruitConfirm', 'action': 'ClickSelf'}))
         self.assertEqual(self.inspect(lines)['status'], 'unknown')
+
+    def test_confirm_click_failure_and_retry_count_only_successful_terminal(self):
+        tags = event('SubTaskExtraInfo', what='RecruitTagsDetected', details={'tags':['tag-c']})
+        click = event('SubTaskCompleted', details={'task':'RecruitConfirm', 'action':'ClickSelf'})
+        terminal = event('SubTaskStart', first=['RecruitConfirm'], details={'task':'RecruitFlag', 'action':'Stop'})
+        r = self.inspect([event('TaskChainStart'), tags, click,
+            event('SubTaskError', first=['RecruitConfirm']), tags, click, terminal,
+            event('TaskChainCompleted')])
+        self.assertEqual(r['confirmed_actions'], 2)
+        self.assertEqual(r['confirmed_recruitments'], 1)
+        self.assertEqual(r['failed_confirmations'], 1)
+        self.assertTrue(r['reminder_required'])
+        self.assertEqual(r['pending'], [])  # Failed attempt is not proof of a remaining empty slot.
+        self.assertEqual([v['outcome'] for v in r['chains'][0]['rounds']], ['confirmation_failed','confirmed'])
+        r = self.inspect([event('TaskChainStart'), tags, event('SubTaskError', first=['RecruitConfirm']),
+                          event('TaskChainCompleted')])
+        self.assertEqual(r['failed_confirmations'], 1)
+        self.assertEqual(r['confirmed_recruitments'], 0)
+        self.assertEqual(r['confirmed_actions'], 0)
+        for ending in ([], [event('SubTaskStart', first=['RecruitBegin'], details={'task':'RecruitFlag','action':'Stop'})]):
+            r = self.inspect([event('TaskChainStart'), tags, click, *ending, event('TaskChainCompleted')])
+            self.assertEqual(r['confirmed_recruitments'], 0)
+            self.assertEqual(r['pending'][0]['outcome'], 'confirmation_attempted')
+
+    def test_legacy_action_counts_never_become_success_counts(self):
+        r = self.result()
+        recruitment = self.inspect(self.rounds())
+        del recruitment['confirmed_recruitments']
+        r['steps']['pre']['tasks'] = [{'type':'Recruit', 'recruitment':recruitment}]
+        out = summarize(r)
+        self.assertIn('recruit_0_legacy', {n['code'] for n in out['notices']})
+        self.assertTrue(any('按钮动作' in f for f in out['facts']))
 
     def result(self):
         return {'status':'completed', 'account':'example', 'game_day':'2026-09-14',
@@ -107,6 +141,15 @@ class ReportTests(unittest.TestCase):
         r=self.result(); before=copy.deepcopy(r)
         summarize(r)
         self.assertEqual(r,before)
+
+    def test_navigation_failure_is_explained_without_inventing_battle_results(self):
+        r = self.result()
+        r['steps']['drain'] = {'status':'stopped','failed_phase':'navigation',
+                              'stage':'LS-6','reason':'runner_failed: 1','remaining_sanity':None}
+        out = summarize(r)
+        self.assertEqual(out['status'], 'incomplete')
+        self.assertIn('drain_navigation', {n['code'] for n in out['notices']})
+        self.assertEqual(out['facts'], [])
 
     def test_failed_fight_observation_is_not_reported_as_verified_or_zero(self):
         r = self.result()

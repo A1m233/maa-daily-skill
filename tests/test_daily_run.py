@@ -15,6 +15,42 @@ import daily_run as daily
 
 
 class DailyTests(unittest.TestCase):
+    def test_navigation_failure_result_reaches_daily_without_missing_file_error(self):
+        import drain_sanity
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ops = object.__new__(daily.Daily)
+            ops.output, ops.stage, ops.policy = root, "LS-6", root / "policy.toml"
+            ops.maa, ops.profile, ops.day, ops.account = "fake-maa", "test", "2026-10-26", "example"
+            ops.config = {"maximum":10, "max_runs":100, "max_phases":5}
+            ops.runtime = Mock(stage_config=root)
+            ops.runtime.artifacts.environment.return_value = {}
+            target = root / "sanity/drain-test"
+            target.mkdir(parents=True)
+            def child(*args, **kwargs):
+                with patch.object(drain_sanity, "Runtime") as factory, \
+                        patch.object(drain_sanity, "load_policy", return_value={"mode":"off", "medicine_expire_days":1}), \
+                        patch("medicine_sanity.preflight"):
+                    runtime = factory.return_value
+                    runtime.output, runtime.reports = target, [{"report_file":"navigation.json"}]
+                    runtime.run.side_effect = ValueError("runner_failed: 1")
+                    runtime.artifacts.finish.return_value = {"warnings":[]}
+                    code = drain_sanity.main(["run", "--stage", "LS-6", "--profile", "test"])
+                    self.assertEqual(runtime.run.call_count, 1)
+                    return daily.subprocess.CompletedProcess([], code)
+            ops.check_day = Mock()
+            ops.pre = Mock(return_value={"status":"completed"})
+            ops.priority = Mock(return_value={"status":"not_scheduled"})
+            ops.award, ops.checks = Mock(), Mock()
+            with patch.object(daily.subprocess, "run", side_effect=child), contextlib.redirect_stdout(io.StringIO()):
+                result = daily.execute_flow(ops, lambda value: None)
+            self.assertEqual(result["status"], "incomplete")
+            self.assertEqual(result["steps"]["drain"]["reason"], "runner_failed: 1")
+            self.assertEqual(result["steps"]["drain"]["failed_phase"], "navigation")
+            self.assertEqual(result["steps"]["drain"]["process_report_files"], ["navigation.json"])
+            ops.award.assert_not_called()
+            ops.checks.assert_not_called()
+
     def test_medicine_unknown_continues_only_after_page_recovery(self):
         import subprocess
         import medicine_sanity

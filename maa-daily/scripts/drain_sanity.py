@@ -518,6 +518,8 @@ def main(argv=None) -> int:
 def _main(args) -> int:
     from artifacts import ArtifactError
     runtime = None
+    result = None
+    phase = "configuration"
     settled = False
     artifact_status = "failed"
     try:
@@ -528,9 +530,12 @@ def _main(args) -> int:
         runtime.configure_stage(args.stage)
         if args.mode == "run":
             from medicine_sanity import preflight, scan
+            phase = "preflight"
             preflight(runtime)
         print("本地证据目录：" + str(runtime.output), flush=True)
+        phase = "navigation"
         navigate(runtime, args.stage, args.start_at)
+        phase = "probe" if args.mode == "probe" else "execution"
         def observe():
             report = runtime.run([probe_task(args.stage)], "probe")
             return read_probe(report, args.stage)
@@ -577,7 +582,19 @@ def _main(args) -> int:
         return 0 if result["status"] in {"completed", "completed_with_reminder", "observed"} else 2
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, ArtifactError) as error:
         settled = True
-        print(json.dumps({"status": "stopped", "reason": str(error), "reminder_required": True}, ensure_ascii=False))
+        result = {**(result or {}), "status": "stopped", "reason": str(error),
+                  "failed_phase": phase, "stage": args.stage, "end_at": "unknown",
+                  "remaining_sanity": None, "reminder_required": True,
+                  "observed_at": dt.datetime.now(dt.timezone.utc).isoformat()}
+        if runtime is not None:
+            result["process_report_files"] = [r["report_file"] for r in runtime.reports if r.get("report_file")]
+            target = runtime.output / "result.json"
+            try:
+                write_json(target, result)
+                result["result_file"] = str(target)
+            except OSError as write_error:
+                result["result_write_error"] = str(write_error)
+        print(json.dumps(result, ensure_ascii=False))
         return 2
     finally:
         if runtime is not None:

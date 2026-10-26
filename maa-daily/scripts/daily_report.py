@@ -33,14 +33,20 @@ def summarize(result):
             if not recruit or recruit.get("status") != "evaluated":
                 note(f"recruit_{i}", "公招结果尚未核验，不能只凭任务完成认定全部开招。")
             else:
-                facts.append(f"公招确认开招 {recruit['confirmed_actions']} 次，刷新 {recruit['refresh_actions']} 次")
+                if type(recruit.get("confirmed_recruitments")) is int:
+                    facts.append(f"公招确认成功 {recruit['confirmed_recruitments']} 次，刷新 {recruit['refresh_actions']} 次")
+                else:
+                    facts.append(f"公招观察到确认按钮动作 {recruit['confirmed_actions']} 次，刷新 {recruit['refresh_actions']} 次")
+                    note(f"recruit_{i}_legacy", "旧公招报告仅统计按钮动作，成功次数未核验；可只读复核原报告，不为统计重跑。")
+                if recruit.get("failed_confirmations"):
+                    note(f"recruit_{i}_failed", f"公招曾有 {recruit['failed_confirmations']} 次确认失败，未计入成功；不能仅凭重试记录判断是否仍有空槽。")
                 for j, pending in enumerate(recruit.get("pending", [])):
                     if pending["outcome"] == "preserved":
                         text = f"公招保留了「{pending['preserved_tag']}」标签，未开招；请决定是否手动处理或调整保留策略。"
                     else:
                         text = "公招有一组标签未确认开招，原因未知；请查看该槽位，不自动补招。"
                     note(f"recruit_{i}_{j}", text)
-                if recruit.get("reminder_required") and not recruit.get("pending"):
+                if recruit.get("reminder_required") and not recruit.get("pending") and not recruit.get("failed_confirmations"):
                     note(f"recruit_{i}_review", "公招存在待核实异常，已确认的动作不代表全部槽位处理完。")
         if item.get("internal_error_lines") or item.get("subtask_error_lines"):
             note("execution_warnings", "运行存在告警，具体记录已保留；不据此猜测商品缺货、余额不足或其它业务原因。")
@@ -52,6 +58,8 @@ def summarize(result):
     if drain.get("status") in DONE and type(drain.get("remaining_sanity")) is int:
         facts.append(f"{drain.get('stage', '目标关卡')} 完成 {drain.get('completed_runs', '未知')} 场，剩余理智 {drain['remaining_sanity']}")
     elif drain.get("status") not in DONE:
+        if drain.get("failed_phase") == "navigation":
+            note("drain_navigation", f"{drain.get('stage', '目标关卡')} 选关导航失败，未进入清体力阶段；需核对关卡开放条件与页面证据后再补跑。")
         observation = drain.get("battle_observation", {})
         if observation.get("status") == "observed":
             count = observation.get("observed_completed_runs")

@@ -43,7 +43,8 @@ def inspect_report(report):
                 if identity in chains:
                     raise ValueError("reused_taskid")
                 chains[identity] = {"taskid": identity, "status": "running", "rounds": [],
-                                    "confirmed_actions": 0, "refresh_actions": 0, "errors": []}
+                                    "confirmed_actions": 0, "confirmed_recruitments": 0,
+                                    "failed_confirmations": 0, "refresh_actions": 0, "errors": []}
                 continue
             c = chains[identity]
             if c["status"] != "running":
@@ -53,6 +54,10 @@ def inspect_report(report):
                 c["status"] = "completed" if kind == "TaskChainCompleted" else "failed"
             elif kind == "SubTaskError":
                 c["errors"].append(number)
+                if (c["rounds"] and "RecruitConfirm" in v.get("first", [])
+                        and c["rounds"][-1]["outcome"] in {"unverified", "confirmation_attempted"}):
+                    c["rounds"][-1].update(outcome="confirmation_failed", failure_line=number)
+                    c["failed_confirmations"] += 1
             elif kind == "SubTaskExtraInfo" and v.get("what") == "RecruitTagsDetected":
                 tags = d.get("tags")
                 if not isinstance(tags, list) or not tags or not all(isinstance(t, str) for t in tags):
@@ -77,8 +82,16 @@ def inspect_report(report):
                 r = c["rounds"][-1]
                 if r["outcome"] != "unverified":
                     raise ValueError("ambiguous_confirm")
-                r["outcome"] = "confirmed"
+                r["outcome"] = "confirmation_attempted"
+                r["confirmation_line"] = number
                 c["confirmed_actions"] += 1
+            elif (kind == "SubTaskStart" and d.get("task", "").split("@")[-1] == "RecruitFlag"
+                  and d.get("action") == "Stop" and v.get("first") == ["RecruitConfirm"]):
+                r = c["rounds"][-1]
+                if r["outcome"] != "confirmation_attempted":
+                    raise ValueError("unmatched_confirmation_terminal")
+                r.update(outcome="confirmed", confirmation_terminal_line=number)
+                c["confirmed_recruitments"] += 1
         result["chains"] = list(chains.values())
         execution = classify_execution(lines)["status"]
         if (not chains or any(c["status"] != "completed" or not c["rounds"] for c in chains.values())
@@ -86,9 +99,11 @@ def inspect_report(report):
                 or report.get("wrapper_exit_code") != 0 or report.get("runner_error")):
             return {**result, "reason": "execution_incomplete"}
         pending = [r for c in chains.values() for r in c["rounds"]
-                   if r["outcome"] in {"preserved", "unverified"}]
+                   if r["outcome"] in {"preserved", "unverified", "confirmation_attempted"}]
         return {**result, "status": "evaluated", "reason": "actions_and_preserved_tags",
                 "confirmed_actions": sum(c["confirmed_actions"] for c in chains.values()),
+                "confirmed_recruitments": sum(c["confirmed_recruitments"] for c in chains.values()),
+                "failed_confirmations": sum(c["failed_confirmations"] for c in chains.values()),
                 "refresh_actions": sum(c["refresh_actions"] for c in chains.values()),
                 "pending": pending,
                 "reminder_required": bool(pending or any(c["errors"] for c in chains.values()))}

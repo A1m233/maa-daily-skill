@@ -38,6 +38,10 @@ def build(repo, ref, version, output):
         files[relative] = git(repo, "cat-file", "blob", oid)
     if "LICENSE" not in files or "SKILL.md" not in files:
         raise ValueError("source must include SKILL.md and LICENSE")
+    if "LICENSE.txt" in files:
+        raise ValueError("LICENSE.txt collides with the packaged repository license")
+    # SkillHub rejects extensionless uploads; preserve the license bytes verbatim.
+    files["LICENSE.txt"] = files.pop("LICENSE")
     source = files["SKILL.md"].decode("utf-8")
     lines = source.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":

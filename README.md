@@ -32,7 +32,7 @@ GitHub 是唯一维护源。SkillHub 只接收 GitHub Release 对应提交的构
 - Actions 产物保留 30 天，包含完整 ZIP、源提交和逐文件 SHA-256 清单；真实提交还保存平台响应。`pending_review` 表示等待审核，必须以平台最终状态确认是否已上架。
 - 上传超时或响应不明时，先在 SkillHub 控制台核对版本是否已创建，再决定是否重试同一工作流，避免盲目重复提交。
 
-构建只读取指定 Git 提交中的 `maa-daily/` 与根 `LICENSE`，不带入本机未提交配置、日志或账号资料。平台要求的 `slug/version/displayName` 只注入发布包，源 `SKILL.md` 保持现有格式。后续更新只需维护 GitHub，并发布新的版本号。
+构建只读取指定 Git 提交中的 `maa-daily/` 与根 `LICENSE`，不带入本机未提交配置、日志或账号资料。平台不接受无后缀文件，许可证在发布包中命名为 `LICENSE.txt`，内容保持原样。平台要求的 `slug/version/displayName` 只注入发布包，源 `SKILL.md` 保持现有格式。后续更新只需维护 GitHub，并发布新的版本号。
 
 本地无上传预检（输出目录必须尚不存在）：
 

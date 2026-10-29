@@ -53,7 +53,8 @@ class SkillHubPackageTests(unittest.TestCase):
         second = package.build(self.repo, "HEAD", "0.1.0", self.root / "two")
         self.assertEqual(first, second)
         with zipfile.ZipFile(self.root / "one" / first["archive"]) as zipped:
-            self.assertEqual(set(zipped.namelist()), {"SKILL.md", "LICENSE", "scripts/helper.py", "assets/tasks.json"})
+            self.assertEqual(set(zipped.namelist()), {"SKILL.md", "LICENSE.txt", "scripts/helper.py", "assets/tasks.json"})
+            self.assertEqual(zipped.read("LICENSE.txt"), self.git("show", "HEAD:LICENSE"))
             self.assertEqual(zipped.read("scripts/helper.py"), b"print('test')\n")
             skill_md = zipped.read("SKILL.md").decode()
             self.assertIn("version: 0.1.0\n", skill_md)

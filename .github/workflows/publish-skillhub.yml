@@ -1,0 +1,71 @@
+name: Publish SkillHub
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Dry-run package version (no upload)'
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skillhub-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Test packaging
+        run: python -m unittest discover -s tests -p 'test_skillhub_package.py' -v
+      - name: Build from checked-out commit
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = release ]; then
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+            VERSION="${RELEASE_TAG#v}"
+          else
+            VERSION="$INPUT_VERSION"
+          fi
+          python scripts/package_skillhub.py --ref HEAD --version "$VERSION" --output dist/skillhub
+      - name: Fetch verified official CLI
+        run: python scripts/fetch_skillhub_cli.py --output "$RUNNER_TEMP/skillhub-cli"
+      - name: Validate official publish metadata without uploading
+        run: python "$RUNNER_TEMP/skillhub-cli/skills_store_cli.py" --skip-self-upgrade publish dist/skillhub/*.zip --dry-run --json
+      - name: Save exact package and source manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: skillhub-${{ github.run_id }}
+          path: dist/skillhub/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Submit release to SkillHub
+        if: github.event_name == 'release'
+        env:
+          SKILLHUB_TOKEN: ${{ secrets.SKILLHUB_KEY }}
+        run: |
+          test -n "$SKILLHUB_TOKEN" || { echo 'Missing Actions secret SKILLHUB_KEY'; exit 1; }
+          python "$RUNNER_TEMP/skillhub-cli/skills_store_cli.py" --skip-self-upgrade publish dist/skillhub/*.zip --host https://api.skillhub.cn --changelog "GitHub release: $GITHUB_SHA" --json > dist/skillhub/response.json
+      - name: Save submission response
+        if: always() && github.event_name == 'release'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: skillhub-response-${{ github.run_id }}
+          path: dist/skillhub/response.json
+          retention-days: 30
+          if-no-files-found: ignore

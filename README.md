@@ -21,6 +21,29 @@
 
 不同 Agent 的 skills 根目录、审批和命令执行模型不同，请以对应产品说明为准。本项目首版在 Codex 上验证，但 Skill 本身不写死 Codex 专有工具。
 
+## SkillHub 分发与发布
+
+GitHub 是唯一维护源。SkillHub 只接收 GitHub Release 对应提交的构建产物，不在平台上另外维护一份 Skill。现有 GitHub 安装方式不变。
+
+维护者首次设置：在 [腾讯 SkillHub](https://skillhub.cn) 登录并完成实名认证，在 [API Key 页面](https://skillhub.cn/dashboard/keys) 创建发布 Token，将其保存到本仓库 Actions Secret **`SKILLHUB_KEY`**。不要把 Token 放进仓库、命令参数或聊天记录。
+
+- 在 Actions 中手动运行 **Publish SkillHub**：只构建和预检，不上传，不需要 Token。
+- 发布正式 GitHub Release（标签格式 `v0.1.0`）：自动从该提交构建、验证并提交 SkillHub；普通 push、草稿和 prerelease 不发布。首次版本拟为 `v0.1.0`，尚未发布前不要把预检当作上架成功。
+- Actions 产物保留 30 天，包含完整 ZIP、源提交和逐文件 SHA-256 清单；真实提交还保存平台响应。`pending_review` 表示等待审核，必须以平台最终状态确认是否已上架。
+- 上传超时或响应不明时，先在 SkillHub 控制台核对版本是否已创建，再决定是否重试同一工作流，避免盲目重复提交。
+
+构建只读取指定 Git 提交中的 `maa-daily/` 与根 `LICENSE`，不带入本机未提交配置、日志或账号资料。平台要求的 `slug/version/displayName` 只注入发布包，源 `SKILL.md` 保持现有格式。后续更新只需维护 GitHub，并发布新的版本号。
+
+本地无上传预检（输出目录必须尚不存在）：
+
+```sh
+python scripts/package_skillhub.py --ref HEAD --version 0.1.0 --output dist/skillhub
+python scripts/fetch_skillhub_cli.py --output dist/skillhub-cli
+python dist/skillhub-cli/skills_store_cli.py --skip-self-upgrade publish dist/skillhub/maa-daily-0.1.0.zip --dry-run --json
+```
+
+官方 CLI 固定为 `2026.8.5`，下载后验证 SHA-256，不安装其附带插件、不改变全局偏好。官方 dry-run 主要验证元数据，完整文件集由本仓库的构建清单和测试核验；它不证明账号权限、平台审核或真实上传成功。发布接口依据[官方指南](https://skillhub.cn/ai/release.md)。
+
 ## 使用
 
 可以直接告诉 Agent：

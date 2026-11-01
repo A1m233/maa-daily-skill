@@ -101,7 +101,7 @@ Skill 会把当前环境证据放在预设示例之前：先读取当前 `--help
 - [MAA 连接设置](https://docs.maa.plus/zh-cn/manual/connection.html)
 - [MAA 集成任务参数](https://docs.maa.plus/en-us/protocol/integration.html)
 
-仓库同时提供两个 task 起点：[`daily.toml`](./maa-daily/assets/daily.toml) 只有启动与保守领奖，[`full-daily.example.toml`](./maa-daily/assets/full-daily.example.toml) 覆盖公招、严格信用商店、保守基建、刷图和领奖。完整模板仍需部署其注明的用户资源、核对版本与个人策略后再运行。
+仓库同时提供两个 task 起点：[`daily.toml`](./maa-daily/assets/daily.toml) 只有启动与保守领奖，[`full-daily.example.toml`](./maa-daily/assets/full-daily.example.toml) 演示公招、严格信用商店、保守基建、刷图和领奖的原生组合。首次创建缺少偏好时，按[默认选择](./maa-daily/references/create-task.md#首次创建的默认选择)生成并简短告知，不逐项询问；已有偏好优先。正式默认入口按创建指南拆分并接入动态清体力，不直接运行示例的旧单倍 Fight。使用前仍需部署依赖资源并核验当前环境。
 
 ## 安全边界
 

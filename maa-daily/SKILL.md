@@ -38,7 +38,7 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 
 - 本地报告、临时 task 和配置快照由组件按[运行产物策略](references/artifacts.md)自动登记和淘汰；默认 14 天、128 MiB，不管理 MAA 原始日志。一般不另选临时输出目录或编写清理脚本；容量/清理告警按该页处理，不据此重跑业务。
 - 分段日常的统一执行、避免剿灭后漏清体力：读 [references/daily-execution.md](references/daily-execution.md)，使用 `daily_run.py` 引用已有 task。账号身份和设备仍由外层核验，不自动恢复或切号。
-- 首次创建或重新整理任务：先读 [references/create-task.md](references/create-task.md)，统一基线、提问与交付流程。
+- 首次创建或重新整理任务：先读 [references/create-task.md](references/create-task.md)，已有偏好优先，缺失业务选择采用其中的[默认值](references/create-task.md#首次创建的默认选择)并简短告知，不逐项问卷式确认；目标不唯一或实质执行缺口仍须处理。
 - 清体力日常的倍率计算、理智预检查与奖励检查组件：读 [references/daily-checks.md](references/daily-checks.md)，复用捆绑脚本/原生 task，不临时手搓；特殊材料目标仅参考算法。
 - 基本关卡的单场理智从[关卡表](assets/stage-costs.json)或 `daily_checks.py stage-cost` 查询，不凭模型记忆填写；已收录关卡的计算与清体力脚本自动取值并拒绝冲突参数。
 - 既有 task 接入动态清体力、替换固定批量与单倍补尾：读 [references/drain-integration.md](references/drain-integration.md)。候选脚本含只导航与循环，先按验证边界接入，不直接重跑旧 Fight。

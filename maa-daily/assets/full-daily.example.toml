@@ -1,6 +1,8 @@
 # 完整参考模板：复制到 `$(maa dir config)/tasks/` 后，逐项 review 再使用。
 # 已验证基线：maa-cli 0.7.5 / MaaCore 6.16.8。
-# 这是安全默认值，不包含账号名、设备、profile 或私人路径。
+# 业务默认值以 references/create-task.md 为准；不包含账号名、设备、profile 或私人路径。
+# 本文件演示原生组件组合。新建默认日常按创建指南拆出前段/选关/领奖，
+# 通过 daily_run.py 接入动态清体力，不直接照跑下面的旧单倍 Fight。
 
 [[tasks]]
 name = "启动明日方舟"
@@ -41,9 +43,9 @@ params = { mode = 0, facility = [], drones = "_NotUse", continue_training = fals
 [[tasks]]
 name = "清理自然理智：固定常驻关卡"
 type = "Fight"
-# 单倍保留为无需动态编排的保守基线；先读 references/daily-checks.md 复用高倍率计算。
-# 识别原型未验证前不要直接替换本链；芯片等材料目标不默认清空理智。
-params = { stage = "1-7", medicine = 0, stone = 0, times = 999, series = 1 }
+# 仅供用户明确选择纯原生方案时参考；新建默认日常由组件读取理智、计算批次和补尾。
+# 不作为组件失败后的自动降级；芯片等材料目标不默认清空理智。
+params = { stage = "1-7", medicine = 0, medicine_expire_days = 0, stone = 0, times = 999, series = 1 }
 
 # 如果改用按星期开放的关卡，为 Weekday condition 显式设置服务器游戏日时区，并用 -vv dry-run
 # 核对最终 stage。例如：

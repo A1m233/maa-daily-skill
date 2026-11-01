@@ -7,4 +7,4 @@ params = { client_type = "Official", start_game_enabled = true }
 
 [[tasks]]
 type = "Award"
-params = { award = true, mail = true, recruit = false, orundum = false, mining = false, specialaccess = false }
+params = { award = true, mail = false, recruit = false, orundum = false, mining = false, specialaccess = false }

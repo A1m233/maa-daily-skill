@@ -163,6 +163,20 @@ class SkillHubSyncTests(unittest.TestCase):
         github.update({"id": 1}, manifest, "submitted", platform_status="pending_review")
         self.assertEqual(github.request.call_args.args[2]["make_latest"], "true")
 
+    def test_community_receipt_accepts_pending_review_without_old_status_key(self):
+        self.start()
+        receipt = {"ok": True, "skillId": 1, "versionId": 2, "slug": "maa-daily",
+                   "version": "0.1.3", "reviewStatus": "pending", "securityScanStatus": "pending"}
+        self.cli.side_effect = [self.runner(None, None, dry=True),
+                               subprocess.CompletedProcess([], 0, json.dumps(receipt), "")]
+        result = self.run_sync("community")
+        self.assertEqual(result["status"], "submitted")
+        self.assertEqual(result["platform_status"], "pending")
+        for change in ({"version": "0.1.2"}, {"slug": "different"}, {"ok": False},
+                       {"versionId": None}, {"reviewStatus": None}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                sync.acceptance({**receipt, **change}, "0.1.3")
+
 
 if __name__ == "__main__":
     unittest.main()

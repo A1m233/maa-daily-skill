@@ -114,6 +114,23 @@ def cli_run(cli, archive, *, dry=False, commit=""):
     return subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=300)
 
 
+def acceptance(response, version):
+    if (not isinstance(response, dict) or response.get("success") is False or response.get("ok") is False
+            or not response.get("skillId") or response.get("version", version) != version
+            or response.get("slug", "maa-daily") != "maa-daily"):
+        raise ValueError("publish response does not confirm this skill/version")
+    # Community publishing returns ok/reviewStatus; the older API returns status.
+    if response.get("ok") is True:
+        status = response.get("reviewStatus")
+        if response.get("version") != version or response.get("slug") != "maa-daily" or not response.get("versionId"):
+            raise ValueError("incomplete community publication receipt")
+    else:
+        status = response.get("status")
+    if not isinstance(status, str) or not status:
+        raise ValueError("publish review status missing")
+    return status
+
+
 def sync(repo, output, cli, *, github=None, dry_version="0.1.0", run_cli=cli_run):
     output = Path(output)
     next_version, latest, record = select(github.releases()) if github else (dry_version, None, None)
@@ -149,12 +166,12 @@ def sync(repo, output, cli, *, github=None, dry_version="0.1.0", run_cli=cli_run
         (output / "response.json").write_text(result.stdout, encoding="utf-8")
         (output / "publish-stderr.txt").write_text(result.stderr, encoding="utf-8")
         response = json.loads(result.stdout)
-        if (result.returncode or not isinstance(response, dict) or response.get("success") is False
-                or not response.get("skillId") or not isinstance(response.get("status"), str)):
+        if result.returncode:
             raise ValueError("publish not confirmed; reconcile with platform before retry")
-        github.update(release, manifest, "submitted", platform_status=response["status"])
+        platform_status = acceptance(response, manifest["version"])
+        github.update(release, manifest, "submitted", platform_status=platform_status)
         return {"status": "submitted", "version": manifest["version"], "commit": manifest["commit"],
-                "platform_status": response["status"], "release": release.get("html_url")}
+                "platform_status": platform_status, "release": release.get("html_url")}
     except Exception:
         # If this update fails, the persisted 'submitting' state still blocks blind retries.
         github.update(release, manifest, "unknown")

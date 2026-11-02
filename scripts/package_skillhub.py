@@ -61,6 +61,11 @@ def build(repo, ref, version, output):
     if existing & extra.keys():
         raise ValueError("source contains distribution metadata; do not maintain two owners")
     injected = "".join(f"{key}: {value}\n" for key, value in extra.items())
+    # Version-independent identity includes the distribution metadata as well as source bytes.
+    identity = {"files": {name: hashlib.sha256(content).hexdigest()
+                          for name, content in sorted(files.items())},
+                "metadata": {key: value for key, value in extra.items() if key != "version"}}
+    source_digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     files["SKILL.md"] = ("".join(lines[:end]) + injected + "".join(lines[end:])).encode("utf-8")
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
@@ -74,6 +79,7 @@ def build(repo, ref, version, output):
             zipped.writestr(info, content)
     manifest = {
         "source": extra["homepage"], "commit": commit, "version": version,
+        "source_digest": source_digest,
         "archive": archive.name, "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
         "files": {name: hashlib.sha256(content).hexdigest() for name, content in sorted(files.items())},
     }

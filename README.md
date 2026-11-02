@@ -23,16 +23,18 @@
 
 ## SkillHub 分发与发布
 
-GitHub 是唯一维护源。SkillHub 只接收 GitHub Release 对应提交的构建产物，不在平台上另外维护一份 Skill。现有 GitHub 安装方式不变。
+GitHub 是唯一维护源。`main` 的 Skill、许可证或发布相关文件变更后，Actions 自动运行全部测试、打包校验并提交 SkillHub，不再需要手动创建 Release。现有 GitHub 安装方式不变。
 
 维护者首次设置：在 [腾讯 SkillHub](https://skillhub.cn) 登录并完成实名认证，在 [API Key 页面](https://skillhub.cn/dashboard/keys) 创建发布 Token，将其保存到本仓库 Actions Secret **`SKILLHUB_KEY`**。不要把 Token 放进仓库、命令参数或聊天记录。
 
-- 在 Actions 中手动运行 **Publish SkillHub**：只构建和预检，不上传，不需要 Token。
-- 发布正式 GitHub Release（标签格式 `v0.1.0`）：自动从该提交构建、验证并提交 SkillHub；普通 push、草稿和 prerelease 不发布。首次版本拟为 `v0.1.0`，尚未发布前不要把预检当作上架成功。
-- Actions 产物保留 30 天，包含完整 ZIP、源提交和逐文件 SHA-256 清单；真实提交还保存平台响应。`pending_review` 表示等待审核，必须以平台最终状态确认是否已上架。
-- 上传超时或响应不明时，先在 SkillHub 控制台核对版本是否已创建，再决定是否重试同一工作流，避免盲目重复提交。
+- **自动发布：** `Publish SkillHub` 串行运行，不中断正在提交的请求；自动运行检出当前 `main`，测试和打包基于同一提交。版本取 GitHub 已有稳定版本的最大值并递增 patch；源文件不用手工维护版本号。
+- **内容去重：** 按实际分发文件及元数据计算不含版本号的内容摘要；与最近稳定版本的已提交同步记录相同则跳过。恢复旧内容也与最近版本比较，仍可作为新版本发布。测试或发布脚本改动会触发检查，但分发内容不变时不重复上传。
+- **手动入口：** Actions 的 `workflow_dispatch` 默认只预检，`version` 只用于此模式；勾选 `publish` 可补发当前 `main`，实际发布拒绝其它分支。不再监听 Release 事件，自动创建的 Release 只是版本与证据记录。
+- **持久记录：** 每次新版本自动建立 GitHub Release，保存 ZIP、源提交、内容摘要和包哈希。Release 描述中的机器记录用于去重与恢复，不随 Actions 产物过期而丢失；完整过程与平台响应另存 Actions artifact，保留 30 天。
+- **结果语义：** `prepared` 尚未提交，可安全接续；`submitting` 表示请求即将或已经发出；`submitted` 只表示平台接收。`pending_review` 仍须等待平台审核，不能称为已上架。
+- **不明结果：** 上传超时、取消或响应不明会留下 `submitting/unknown`，后续自动发布一律停下，不以新版本号绕过。先到 SkillHub 控制台核对该版本：确认已接收后，根据平台证据将该 Release 机器记录的 `status` 改为 `submitted` 并记下 `platform_status`；确认请求未被接收才改回 `prepared`。保留版本、内容摘要、包哈希与提交锚点，然后重新运行 Actions。仅凭超时不能改回 `prepared`。
 
-构建只读取指定 Git 提交中的 `maa-daily/` 与根 `LICENSE`，不带入本机未提交配置、日志或账号资料。平台不接受无后缀文件，许可证在发布包中命名为 `LICENSE.txt`，内容保持原样。平台要求的 `slug/version/displayName` 只注入发布包，源 `SKILL.md` 保持现有格式。后续更新只需维护 GitHub，并发布新的版本号。
+构建只读取指定 Git 提交中的 `maa-daily/` 与根 `LICENSE`，不带入本机未提交配置、日志或账号资料。平台不接受无后缀文件，许可证在发布包中命名为 `LICENSE.txt`，内容保持原样。平台要求的 `slug/version/displayName` 只注入发布包，源 `SKILL.md` 保持现有格式。后续只需维护 GitHub 并合入 `main`。
 
 本地无上传预检（输出目录必须尚不存在）：
 

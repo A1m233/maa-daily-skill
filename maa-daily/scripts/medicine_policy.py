@@ -37,7 +37,7 @@ def recovery_task(stage: str, policy: dict, maximum: int, max_runs: int) -> dict
 def inspect_recovery(report: dict, stage: str, days: int, max_runs: int) -> dict:
     """Validate MAA's recovery phase independently of the no-recovery drain loop."""
     from drain_sanity import callbacks
-    events = callbacks(report)
+    events = callbacks(report, allow_navigation_recovery=True)
     chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
     if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Fight")
             or chains[1][:2] != ("TaskChainCompleted", "Fight") or chains[0][2] != chains[1][2]):

@@ -48,12 +48,40 @@ def recorded_callbacks(report: dict) -> list[tuple[str, dict]]:
     return events
 
 
-def callbacks(report: dict) -> list[tuple[str, dict]]:
+def callbacks(report: dict, *, allow_navigation_recovery: bool = False) -> list[tuple[str, dict]]:
     if report.get("wrapper_exit_code") != 0 or report.get("child_exit_code") != 0:
         raise ValueError("process_failed_or_unbounded")
     events = recorded_callbacks(report)
-    if any(k in {"TaskChainError", "SubTaskError"} for k, _ in events):
+    if any(k in {"TaskChainError", "TaskChainStopped", "InternalError", "InitFailed"} for k, _ in events):
         raise ValueError("invalid_or_failed_callback")
+    errors = [i for i, (kind, _) in enumerate(events) if kind == "SubTaskError"]
+    if errors:
+        if not allow_navigation_recovery:
+            raise ValueError("invalid_or_failed_callback")
+        chains = [(i, kind, value.get("taskchain"), value.get("taskid"))
+                  for i, (kind, value) in enumerate(events) if kind.startswith("TaskChain")]
+        if (len(chains) != 2 or chains[0][1:3] != ("TaskChainStart", "Fight")
+                or chains[1][1:3] != ("TaskChainCompleted", "Fight") or chains[0][3] != chains[1][3]):
+            raise ValueError("ambiguous_navigation_recovery_chain")
+        identity = chains[0][2:]
+        starts = [i for i, (kind, value) in enumerate(events)
+                  if kind == "SubTaskStart" and value.get("subtask") == "StageNavigationTask"
+                  and (value.get("taskchain"), value.get("taskid")) == identity]
+        milestones = [i for i, (kind, value) in enumerate(events)
+                      if kind == "SubTaskCompleted" and value.get("subtask") == "StageNavigationTask"
+                      and (value.get("taskchain"), value.get("taskid")) == identity]
+        if (len(starts) != 1 or len(milestones) != 1
+                or not all(chains[0][0] < starts[0] < i < milestones[0] < chains[1][0]
+                and (events[i][1].get("taskchain"), events[i][1].get("taskid")) == identity for i in errors)):
+            raise ValueError("navigation_recovery_unverified")
+        for kind, value in events[:milestones[0]]:
+            detail = value.get("details", {})
+            node = detail.get("task", "").split("@")[-1]
+            if (kind == "SubTaskExtraInfo" and (value.get("what") in {"UseMedicine", "StageDrops"}
+                    or value.get("what") == "FightTimes" and detail.get("times_finished", 0) != 0)
+                    or kind in {"SubTaskStart", "SubTaskCompleted"} and node in STOP_NODES
+                    and detail.get("action") not in {None, "Stop", "DoNothing"}):
+                raise ValueError("resource_action_before_navigation_recovery")
     return events
 
 
@@ -144,7 +172,7 @@ def navigation_tasks(stage: str, start_at: str = "auto") -> list[dict]:
 
 def read_navigation(report: dict, stage: str) -> str:
     normalize_stage(stage)
-    events = callbacks(report)
+    events = callbacks(report, allow_navigation_recovery=True)
     chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
     if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Fight")
             or chains[1][:2] != ("TaskChainCompleted", "Fight") or chains[0][2] != chains[1][2]):
@@ -239,7 +267,7 @@ def check_fight(report: dict, stage: str, expected: int) -> None:
 
 
 def _check_fight(report: dict, stage: str, expected: int) -> None:
-    events = callbacks(report)
+    events = callbacks(report, allow_navigation_recovery=True)
     chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
     if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Fight")
             or chains[1][:2] != ("TaskChainCompleted", "Fight") or chains[0][2] != chains[1][2]):

@@ -115,8 +115,7 @@ def verified_events(report: dict) -> list[tuple[str, dict]]:
 
 def priority_result(report: dict, params: dict, goal: str) -> dict:
     events = verified_events(report)
-    if any(k == "SubTaskError" for k, _ in events):
-        raise ValueError("priority_subtask_error")
+    errors = [i for i, (kind, _) in enumerate(events) if kind == "SubTaskError"]
     extras = [v for k, v in events if k == "SubTaskExtraInfo" and v.get("taskchain") == "Fight"]
     counts = [v["details"].get("times_finished") for v in extras if v.get("what") == "FightTimes"]
     if not counts or any(type(n) is not int or n < 0 for n in counts) or counts != sorted(counts):
@@ -127,8 +126,22 @@ def priority_result(report: dict, params: dict, goal: str) -> dict:
                   and 0 < progress[-1][0] == progress[-1][1])
     if (goal == "weekly_cap" and not capped) or (goal == "configured_runs" and counts[-1] < params["times"]):
         raise ValueError("priority_goal_unverified")
-    return {"status": "completed", "goal": goal, "completed_runs": counts[-1],
-            "weekly_progress": progress[-1] if progress else None}
+    count_index = max(i for i, (kind, value) in enumerate(events)
+                      if kind == "SubTaskExtraInfo" and value.get("taskchain") == "Fight"
+                      and value.get("what") == "FightTimes")
+    goal_index = (max(i for i, (kind, value) in enumerate(events)
+                      if kind == "SubTaskExtraInfo" and value.get("taskchain") == "Fight"
+                      and value.get("what") == "StageDrops"
+                      and "annihilation_weekly_process" in value.get("details", {}))
+                  if goal == "weekly_cap" else count_index)
+    if errors and min(count_index, goal_index) <= errors[-1]:
+        raise ValueError("priority_goal_after_error_unverified")
+    return {"status": "completed_with_reminder" if errors else "completed",
+            "goal": goal, "completed_runs": counts[-1],
+            "weekly_progress": progress[-1] if progress else None,
+            "reminder_required": bool(errors),
+            "subtask_errors": [events[i][1] for i in errors],
+            "basis": "completed_execution_and_goal_evidence_after_last_subtask_error" if errors else "verified_goal"}
 
 
 def execute_flow(ops, save) -> dict:
@@ -261,7 +274,9 @@ class Daily:
                 "tasks": observations, "reminder_required": warnings, "reports": str(self.output / "processes.json")}
 
     def priority(self):
-        return {"status": "completed" if self.priority_reports else "not_scheduled", "results": self.priority_reports}
+        reminder = any(r.get("reminder_required") for r in self.priority_reports)
+        return {"status": ("completed_with_reminder" if reminder else "completed") if self.priority_reports else "not_scheduled",
+                "reminder_required": reminder, "results": self.priority_reports}
 
     def drain(self):
         target = self.output / "sanity"

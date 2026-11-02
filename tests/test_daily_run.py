@@ -243,6 +243,52 @@ class DailyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 daily.priority_result({}, {"times": 999}, "weekly_cap")
 
+    def test_priority_requires_goal_and_count_after_last_error_without_whitelists(self):
+        count = ("SubTaskExtraInfo", {"taskchain": "Fight", "what": "FightTimes", "details": {"times_finished": 6}})
+        progress = ("SubTaskExtraInfo", {"taskchain": "Fight", "what": "StageDrops", "details": {"annihilation_weekly_process": [1800, 1800]}})
+        error = ("SubTaskError", {"taskchain": "Fight", "first": ["UnspecifiedSubstep"]})
+        for events, accepted in (([error, count, progress], True), ([count, error, progress], False),
+                                 ([progress, error, count], False), ([count, progress, error], False),
+                                 ([error, count, progress, error], False)):
+            with self.subTest(events=events), patch.object(daily, "verified_events", return_value=events):
+                if not accepted:
+                    with self.assertRaisesRegex(ValueError, "priority_goal_after_error_unverified"):
+                        daily.priority_result({}, {"times": 999}, "weekly_cap")
+                    continue
+                result = daily.priority_result({}, {"times": 999}, "weekly_cap")
+                self.assertEqual(result["status"], "completed_with_reminder")
+                self.assertEqual(result["subtask_errors"], [error[1]])
+                ops = object.__new__(daily.Daily)
+                ops.priority_reports = [result]
+                self.assertTrue(ops.priority()["reminder_required"])
+        with patch.object(daily, "verified_events", return_value=[error, count]):
+            self.assertEqual(daily.priority_result({}, {"times": 6}, "configured_runs")["completed_runs"], 6)
+            with self.assertRaisesRegex(ValueError, "priority_goal_unverified"):
+                daily.priority_result({}, {"times": 7}, "configured_runs")
+
+    def test_priority_recovered_error_still_requires_intact_completed_execution(self):
+        for terminal, mutate in (("TaskChainCompleted", False), ("TaskChainError", False),
+                                 ("TaskChainCompleted", True)):
+            with self.subTest(terminal=terminal, mutate=mutate), tempfile.TemporaryDirectory() as directory:
+                def event(kind, **value):
+                    return daily.MARKER + kind + " " + json.dumps({"taskchain": "Fight", "taskid": 1, **value}) + "\n"
+                data = (event("TaskChainStart") + event("SubTaskError", first=["UnspecifiedSubstep"])
+                        + event("SubTaskExtraInfo", what="StageDrops", details={"annihilation_weekly_process": [1800, 1800]})
+                        + event("SubTaskExtraInfo", what="FightTimes", details={"times_finished": 6})
+                        + event(terminal)).encode()
+                log = Path(directory) / "asst.log"
+                log.write_bytes(data + b"tampered" if mutate else data)
+                report = {"child_exit_code": 0, "wrapper_exit_code": 0,
+                          "evidence": {"state": "bounded", "log_file": str(log), "before_size": 0,
+                                       "after_size": len(data), "interval_sha256": hashlib.sha256(data).hexdigest()}}
+                if mutate:
+                    log.write_bytes(b"x" * len(data))
+                if terminal == "TaskChainCompleted" and not mutate:
+                    self.assertEqual(daily.priority_result(report, {"times": 999}, "weekly_cap")["status"], "completed_with_reminder")
+                else:
+                    with self.assertRaises(ValueError):
+                        daily.priority_result(report, {"times": 999}, "weekly_cap")
+
     def test_pre_diagnostics_surface_as_reminders(self):
         ops = object.__new__(daily.Daily)
         ops.before = [{"type": "Recruit", "params": {}}]

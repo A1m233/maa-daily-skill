@@ -339,6 +339,15 @@ class RewardCheckTests(unittest.TestCase):
                 self.assertEqual(invoke()[0], 2)
                 shutil.copyfile(assets / (check.TASK + ".toml"), root / "tasks" / (check.TASK + ".toml"))
                 shutil.copyfile(assets / "tasks.json", root / "resource/tasks/tasks.json")
+                self.assertEqual(invoke()[0], 2)  # Deployed files alone do not bind installed MAA templates.
+                import resource_templates as binding
+                official = root / "official"
+                (official / "tasks").mkdir(parents=True)
+                (official / "template").mkdir()
+                definitions = {name: {"template": "fixture.png"} for name in binding.BINDINGS.values()}
+                (official / "template/fixture.png").write_bytes(b"fixture")
+                binding.atomic(official / "tasks/tasks.json", definitions)
+                binding.bind(root, [official])
                 code, result = invoke()
                 self.assertEqual(code, 0)
                 self.assertEqual(result["status"], "installed")
@@ -346,7 +355,7 @@ class RewardCheckTests(unittest.TestCase):
                 self.assertFalse(result["game_state_checked"])
                 (root / "resource/tasks/tasks.json").write_text('{}', encoding="utf-8")
                 self.assertEqual(invoke()[0], 2)
-                self.assertEqual(run.call_count, 3)  # No MAA run or resource writes by preflight.
+                self.assertEqual(run.call_count, 4)  # No MAA run or resource writes by preflight.
 
 
 if __name__ == "__main__":

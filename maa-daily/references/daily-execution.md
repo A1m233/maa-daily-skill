@@ -26,7 +26,7 @@ python <skill-root>/scripts/daily_run.py preflight --config <本机配置.toml> 
 python <skill-root>/scripts/daily_run.py run --config <本机配置.toml> --maa <exe> --profile <profile> --account <本地别名>
 ```
 
-`preflight` 读取与 dry-run，不连接游戏、不部署资源；会建立本地证据/配置快照，不能称为零文件写入。先用 `daily_checks.py prepare` 部署资源，冲突按原流程处理，不自动覆盖。`run` 自己再次预检，不接受旧 preflight 作为运行许可；两者都不提供设备在线或账号身份核验，不能因为执行器会在连接错误后停止，就用真实业务代替环境检查。
+`preflight` 读取与 dry-run，不连接游戏、不部署资源；会建立本地证据/配置快照，不能称为零文件写入。先按[检查部署](daily-checks.md#复用入口)完成 `daily_checks.py prepare` 和官方模板绑定，冲突按原流程处理，不自动覆盖。`run` 自己再次预检，不接受旧 preflight 作为运行许可；两者都不提供设备在线或账号身份核验，不能因为执行器会在连接错误后停止，就用真实业务代替环境检查。
 
 调用环境需要允许在实际 MAA config 根创建/删除协作锁、写输出快照，以及 maa-cli dry-run 所需的日志/缓存写入和可能的热更新网络；「不操作游戏」不等于文件系统只读或网络必定禁用。按实际拒绝信息申请最小权限，不绕过宿主门禁。只补清体力等独立阶段时，使用该组件的前置检查，不机械执行完整日常 preflight 来重新解析已完成前段。
 

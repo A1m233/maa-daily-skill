@@ -202,6 +202,9 @@ def check_install(executable: str) -> Path:
         raise ValueError("scan task differs from bundled task; refusing execution")
     resource = json.loads((config / "resource/tasks/tasks.json").read_text(encoding="utf-8-sig"))
     bundled = json.loads((assets / "tasks.json").read_text(encoding="utf-8"))
+    from resource_templates import check, expected_nodes
+    check(config)
+    bundled = expected_nodes(config, bundled)
     for key, value in bundled.items():
         if key.startswith(PREFIX + "Reward") and resource.get(key) != value:
             raise ValueError(f"scan resource differs: {key}")

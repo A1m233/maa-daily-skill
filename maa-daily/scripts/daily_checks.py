@@ -125,6 +125,8 @@ def prepare(config: Path) -> list[str]:
     additions = json.loads((assets / "tasks.json").read_text(encoding="utf-8"))
     additions.update(json.loads((assets.parent / "drain-sanity/tasks.json").read_text(encoding="utf-8")))
     additions.update(json.loads((assets.parent / "medicine-check/tasks.json").read_text(encoding="utf-8")))
+    from resource_templates import expected_nodes
+    additions = expected_nodes(config, additions)
     if not isinstance(existing, dict):
         raise ValueError("user resource must be a JSON object")
     for key, value in additions.items():

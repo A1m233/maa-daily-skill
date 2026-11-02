@@ -21,6 +21,7 @@ class SkillContractTests(unittest.TestCase):
             "scripts/log_evidence.py",
             "scripts/client_check.py",
             "scripts/daily_checks.py",
+            "scripts/resource_templates.py",
             "scripts/reward_check.py",
             "scripts/infrast_check.py",
             "scripts/drain_sanity.py",
@@ -200,14 +201,7 @@ class SkillContractTests(unittest.TestCase):
             task = payload[name]
             self.assertEqual(["招聘许可"], task["text"])
             self.assertEqual("ClickSelf", task["action"])
-        bought = payload["MaaDailyCredit@CreditShop-Bought"]
-        self.assertEqual("CreditShop-Bought.png", bought["template"])
-        custom_reference = (
-            SKILL_ROOT / "references" / "custom-tasks.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("当前捆绑资源有一个已确认的待修缺口", custom_reference)
-        self.assertIn("templ not found MaaDailyCredit@CrisisPopup.png", custom_reference)
-        self.assertIn("`CreditShop-BuyIt` → `CreditShop-Bought`", custom_reference)
+        # Runtime compatibility is verified by binding tests, not fixed prose.
 
     def test_mumu_visibility_lifecycle_is_guarded(self) -> None:
         skill = SKILL_MD.read_text(encoding="utf-8")

@@ -18,6 +18,8 @@ python <skill-root>/scripts/daily_checks.py prepare --config-dir <MAA_CONFIG_DIR
 同时合并 `assets/drain-sanity/tasks.json` 的目标关卡确认及自动导航节点，供[动态清体力候选组件](drain-integration.md)使用；部署这些节点不代表导航或战斗已经通过真实验证。
 同时部署 `assets/medicine-check/tasks.json`，供[统一临期药流程](expiring-medicine.md)使用；新增资源需重新 prepare，不能把 Skill 更新等同于用户资源已更新。
 
+首次部署后，还须按[派生模板绑定](custom-tasks.md#派生模板绑定与升级)调用 `resource_templates.py bind`，从当前实际官方资源层绑定奖励导航模板；只执行 `prepare` 不代表可开始业务。已有绑定时 `prepare` 使用当前官方模板计算期望值，不把节点改回旧基线。官方资源升级后若提示模板变化，先核对层顺序并重新绑定，再预检；不要删除用户资源绕过冲突。
+
 检查仍通过 maa-cli 和薄 runner 执行：
 
 ```text
@@ -40,7 +42,7 @@ python <skill-root>/scripts/daily_checks.py inspect --report <local>/sanity.json
 python <skill-root>/scripts/reward_check.py --layout cn-daily-ten-v1 preflight --maa <maa-executable>
 ```
 
-复用扫描入口的安装校验，只执行同一个 maa-cli 的 `dir config --batch` 并读取该配置根下的扫描 task 与资源，不启动游戏、不扫描、不写文件。退出 0 / `status=installed` 仅证明捆绑扫描资源一致，输出明确保留 `profile_checked=false`、`game_state_checked=false`。退出 2 时读取 stderr 中的缺失/冲突原因；不要用它代替奖励状态。
+复用扫描入口的安装校验，只执行同一个 maa-cli 的 `dir config --batch`，读取扫描 task、用户资源及已绑定的官方资源层，不启动游戏、不扫描、不写文件。退出 0 / `status=installed` 仅证明扫描资源与当前模板绑定一致，输出明确保留 `profile_checked=false`、`game_state_checked=false`；不证明所记录加载层与当前 profile 一致。退出 2 时读取 stderr 中的缺失/冲突原因；不要用它代替奖励状态。
 
 随后由 Agent 读取本轮实际 profile 确认 `resource.user_resource = true`，并 dry-run `maa-daily-reward-scan`；继承或覆盖配置按原生配置规则核对。需要部署时用上文 `prepare`，再重复预检。扫描时仍会再次校验资源，防止预检后变化。部署授权与不能静默降级的责任由[收尾检查依赖预检](safety-and-results.md#收尾检查依赖预检)维护。
 
@@ -59,6 +61,8 @@ python <skill-root>/scripts/reward_check.py --layout cn-daily-ten-v1 scan --prof
 新增 `RewardPageRecheckA/B` 资源后，更新 Skill 仍须经授权执行 `daily_checks.py prepare` 再 preflight；旧部署缺少节点时在操作游戏前拒绝，不静默绕过复核。
 
 本适配器的显式前提：国服日常有十档，合成玉第七档、扫荡券第九档，已领取档位带“已完成”标记并排在未领取档位后面。映射由本次游戏现场与用户确认，不能外推为跨客户端永久协议。`cn-daily-ten-v1` 固定的是游戏界面布局，不含账号、设备或私人路径；其它布局需验证新的适配器，不随意改常量凑结果。
+
+2026-11-02 使用 MaaCore 6.21.0 及官方模板绑定完成两个账号的导航和扫描，均得到四次稳定观测、10/10 档及两项关键奖励已领。此次没有修改档位算法，也没有覆盖新版界面的部分领取状态；旧版部分档位测试不能冒充新版实测。
 
 扫描选择日常页，分别滚动到顶部和底部，每个端点重复观察一次。MaaCore 执行全部识别，Python 只消费日志中的文字、位置和分数：
 

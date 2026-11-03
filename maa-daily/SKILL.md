@@ -40,7 +40,7 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 - 分段日常的统一执行、避免剿灭后漏清体力：读 [references/daily-execution.md](references/daily-execution.md)，使用 `daily_run.py` 引用已有 task。账号身份和设备仍由外层核验，不自动恢复或切号。
 - 首次创建或重新整理任务：先读 [references/create-task.md](references/create-task.md)，已有偏好优先，缺失业务选择采用其中的[默认值](references/create-task.md#首次创建的默认选择)并简短告知，不逐项问卷式确认；目标不唯一或实质执行缺口仍须处理。
 - 清体力日常的倍率计算、理智预检查与奖励检查组件：读 [references/daily-checks.md](references/daily-checks.md)，复用捆绑脚本/原生 task，不临时手搓；特殊材料目标仅参考算法。
-- 基本关卡的单场理智从[关卡表](assets/stage-costs.json)或 `daily_checks.py stage-cost` 查询，不凭模型记忆填写；已收录关卡的计算与清体力脚本自动取值并拒绝冲突参数。
+- 完整日常按[日常成本解析规则](references/daily-execution.md#单场理智成本)读取已绑定的 MAA 资源。新活动优先改本地选关 task；预检返回可靠成本即可沿用执行器。可用 `daily_checks.py stage-cost --config-dir <本机配置目录> --stage <关卡>` 离线核对。
 - 既有 task 接入动态清体力、替换固定批量与单倍补尾：读 [references/drain-integration.md](references/drain-integration.md)。候选脚本含只导航与循环，先按验证边界接入，不直接重跑旧 Fight。
 - 清体力接受标准关卡代码，起点与选关交给原生 MAA；脚本在隔离配置中阻断战斗入口，再独立核验准备页，不要求 Agent 看屏幕或先回首页。通用导航已有 AP-5、PR-D-2、1-7 的只导航实测；其余范围及未知关卡 `--cost` 来源见上述指南，不猜 `--start-at` 重试。
 - 博士升级也会恢复理智；组件在已核验战斗后重新读数计算，不单凭理智上涨停止，也不忽略识别错误。参见[升级恢复的已知边界](references/drain-integration.md#已知边界博士升级恢复理智)。

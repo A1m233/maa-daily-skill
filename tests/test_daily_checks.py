@@ -213,6 +213,30 @@ class DailyChecksTests(unittest.TestCase):
             checks.stage_cost("UNKNOWN")
         self.assertEqual(checks.stage_cost("UNKNOWN", 21), 21)
 
+    def test_bound_stage_cost_priority_fallback_and_ambiguity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cfg = Path(directory)
+            base, hot = cfg / "base", cfg / "hot"
+            for path in (base, hot, cfg / "policies"):
+                path.mkdir()
+            (cfg / "policies/resource-templates.json").write_text(json.dumps({
+                "version": 1, "roots": [str(base), str(hot)], "nodes": {"MaaDailyCheck@DailyPage": {}}}))
+            (base / "stages.json").write_text(json.dumps([{"code":"XX-7","apCost":18}]))
+            path = hot / "stages.json"
+            def read(stage, supplied=None):
+                return checks.resolve_cost(stage, supplied, config_dir=cfg)
+            self.assertEqual(read("XX-7")["cost"], 18)
+            path.write_text(json.dumps([{"code":"XX-7","apCost":21}] * 2))
+            self.assertEqual(read("XX-7"), {"stage":"XX-7", "cost":21, "source":str(path)})
+            self.assertEqual(read("LS-6")["source"], "bundled")
+            self.assertEqual(read("YY-8", 24)["source"], "explicit")
+            with self.assertRaisesRegex(ValueError, "mismatch"):
+                read("XX-7", 18)
+            for invalid in (True, 0, 30):
+                path.write_text(json.dumps([{"code":"XX-7","apCost":21}, {"code":"XX-7","apCost":invalid}]))
+                with self.assertRaisesRegex(ValueError, "ambiguous_stage_cost"):
+                    read("XX-7", 21)
+
     def test_plan_uses_known_cost_before_creating_file(self):
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             target = Path(directory) / "next.json"

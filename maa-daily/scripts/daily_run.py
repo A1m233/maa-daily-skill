@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tomllib
 
-from daily_checks import stage_cost
+from daily_checks import resolve_cost
 from drain_sanity import Runtime, write_json
 from infrast_check import inspect_report as inspect_infrast
 from medicine_policy import load_policy
@@ -32,7 +32,7 @@ STEPS = ("pre", "priority", "drain", "award", "checks")
 def load_config(path: Path) -> dict:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     allowed = {"version", "pre_tasks", "stage_task", "award_task", "medicine_policy",
-               "maximum", "max_runs", "max_phases", "priority_goal"}
+               "maximum", "max_runs", "max_phases", "priority_goal", "stage_costs"}
     if set(data) - allowed or data.get("version") != 1:
         raise ValueError("unsupported_daily_config")
     if (not isinstance(data.get("pre_tasks"), list) or not data["pre_tasks"]
@@ -49,6 +49,10 @@ def load_config(path: Path) -> dict:
             raise ValueError("invalid_daily_budget")
     if data.get("priority_goal") not in {"weekly_cap", "configured_runs"}:
         raise ValueError("explicit_priority_goal_required")
+    costs = data.get("stage_costs", {})
+    if not isinstance(costs, dict) or any(normalize_stage(k) != k or type(v) is not int or v <= 0
+                                          for k, v in costs.items()):
+        raise ValueError("invalid_stage_costs")
     policy = data.get("medicine_policy")
     if not isinstance(policy, str) or not policy:
         raise ValueError("medicine_policy_required")
@@ -83,7 +87,6 @@ def validate_plan(pre: list[dict], selector: list[dict], award: list[dict]) -> s
     if choice.get("times") != 0 or any(choice.get(k, 0) != 0 for k in ("medicine", "medicine_expire_days", "stone")):
         raise ValueError("stage_policy_must_be_dry_run_only")
     stage = normalize_stage(choice.get("stage", ""))
-    stage_cost(stage)  # 首版日常只接受成本表已收录关卡，通用组件仍支持显式成本。
     for task in pre:
         if task["type"] not in {"Recruit", "Mall", "Custom", "Infrast", "Fight"}:
             raise ValueError("unsupported_pre_task")
@@ -182,7 +185,7 @@ class Daily:
     def __init__(self, config: dict, maa: str, profile: str, account: str, output: Path | None, *, artifacts=None):
         self.config, self.maa, self.profile, self.account = config, maa, profile, account
         self.day = game_day(dt.datetime.now(dt.timezone.utc))
-        check_install(maa)
+        self.config_root = check_install(maa)
         self.runtime = Runtime(maa, profile, output, artifacts=artifacts)
         self.output = self.runtime.output
         self.before, self.after, self.pre_reports, self.priority_reports = [], [], [], []
@@ -190,12 +193,13 @@ class Daily:
             self.before.extend(self.resolve(name))
         selector, self.after = self.resolve(config["stage_task"]), self.resolve(config["award_task"])
         self.stage = validate_plan(self.before, selector, self.after)
+        self.cost_info = resolve_cost(self.stage, config.get("stage_costs", {}).get(self.stage), config_dir=self.config_root)
         self.runtime.configure_stage(self.stage)
         medicine_preflight(self.runtime)
         self.policy = self.output / "medicine-policy.toml"
         self.policy.write_bytes(Path(config["medicine_policy"]).read_bytes())
         write_json(self.output / "plan.json", {"game_day": self.day, "account": account, "config": config,
-                    "stage": self.stage, "pre": self.before, "award": self.after,
+                    "stage": self.stage, "stage_cost": self.cost_info, "pre": self.before, "award": self.after,
                     "policy_sha256": hashlib.sha256(self.policy.read_bytes()).hexdigest(),
                     "identity_note": "caller verified; account alias is not a game identity assertion"})
         self.check_day()
@@ -283,7 +287,8 @@ class Daily:
         env = self.runtime.artifacts.environment()
         env["MAA_CONFIG_DIR"] = str(self.runtime.stage_config)
         code = subprocess.run([sys.executable, "-X", "utf8", "-B", str(HERE / "drain_sanity.py"), "run",
-                "--stage", self.stage, "--policy", str(self.policy), "--maa", self.maa, "--profile", self.profile,
+                "--stage", self.stage, "--cost", str(self.cost_info["cost"]), "--cost-config-dir", str(self.config_root),
+                "--policy", str(self.policy), "--maa", self.maa, "--profile", self.profile,
                 "--output-dir", str(target), "--maximum", str(self.config["maximum"]),
                 "--max-runs", str(self.config["max_runs"]), "--max-phases", str(self.config["max_phases"])], env=env).returncode
         results = list(target.glob("drain-*/result.json"))
@@ -294,7 +299,9 @@ class Daily:
         if code or value.get("status") not in {"completed", "completed_with_reminder"}:
             return {**value, "status": "stopped"}
         sanity = value.get("remaining_sanity")
-        if type(sanity) is not int or not 0 <= sanity < stage_cost(self.stage) or value.get("stage") != self.stage:
+        cost = self.cost_info["cost"]
+        if (type(sanity) is not int or not 0 <= sanity < cost or value.get("stage") != self.stage
+                or type(value.get("cost")) is not int or value["cost"] != cost):
             raise ValueError("drain_goal_unverified")
         if value.get("end_at") != "prepared":
             return {**value, "status": "stopped", "reason": "drain_page_unverified"}
@@ -350,7 +357,7 @@ def _main(args):
         print("日常预检开始", flush=True)
         ops = Daily(config, args.maa, args.profile, args.account, args.output_dir, artifacts=artifacts)
         if args.mode == "preflight":
-            result = {"status": "prepared", "game_day": ops.day, "stage": ops.stage, "game_operated": False}
+            result = {"status": "prepared", "game_day": ops.day, "stage": ops.stage, "stage_cost": ops.cost_info, "game_operated": False}
         else:
             result = execute_flow(ops, lambda r: write_json(ops.output / "daily-result.json", r))
             brief = summarize(result)

@@ -20,19 +20,42 @@ def cost_catalog() -> dict:
     return json.loads((Path(__file__).resolve().parents[1] / "assets/stage-costs.json").read_text(encoding="utf-8"))
 
 
-def stage_cost(stage: str | None, supplied: int | None = None) -> int:
-    """Known stages use bundled facts; explicit cost is an assertion, not override."""
+def resolve_cost(stage: str | None, supplied: int | None = None, *, config_dir: Path | None = None) -> dict:
+    """Use the first matching verified MAA layer in descending load priority."""
+    from resource_templates import manifest
     key = stage.strip().upper() if isinstance(stage, str) else None
-    known = cost_catalog()["costs"].get(key)
     if supplied is not None and (type(supplied) is not int or supplied <= 0):
         raise ValueError("positive integer cost required")
-    if known is not None:
-        if supplied is not None and supplied != known:
-            raise ValueError(f"stage_cost_mismatch: {stage} requires {known}, got {supplied}")
-        return known
-    if supplied is None:
-        raise ValueError("unknown_stage_cost: supply a verified --cost for an uncatalogued stage")
-    return supplied
+    binding = manifest(config_dir) if config_dir is not None else None
+    known, source = None, None
+    if binding:
+        for root in reversed(binding["roots"]):
+            path = Path(root) / "stages.json"
+            if not path.exists():
+                continue
+            rows = json.loads(path.read_text(encoding="utf-8-sig"))
+            if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
+                raise ValueError(f"invalid_stage_resource: {path}")
+            matches = [r.get("apCost") for r in rows if r.get("code") == key]
+            if not matches:
+                continue
+            if any(type(n) is not int or n <= 0 for n in matches) or len(set(matches)) != 1:
+                raise ValueError(f"invalid_or_ambiguous_stage_cost: {key} in {path}")
+            known, source = matches[0], str(path)
+            break
+    if known is None:
+        known = cost_catalog()["costs"].get(key)
+        source = "bundled" if known is not None else "explicit"
+    if known is not None and supplied is not None and supplied != known:
+        raise ValueError(f"stage_cost_mismatch: {key} requires {known}, got {supplied}")
+    cost = known if known is not None else supplied
+    if cost is None:
+        raise ValueError(f"unknown_stage_cost: {key}; provide a verified local stage_costs entry or --cost")
+    return {"stage": key, "cost": cost, "source": source}
+
+
+def stage_cost(stage: str | None, supplied: int | None = None) -> int:
+    return resolve_cost(stage, supplied)["cost"]
 
 
 def plan(sanity: int, cost: int, maximum: int) -> dict:
@@ -185,6 +208,7 @@ def main(argv=None) -> int:
     installer.add_argument("--config-dir", type=Path, required=True)
     costs = commands.add_parser("stage-cost", help="只读查询已核验的基本关卡消耗，不启动 MAA")
     costs.add_argument("--stage", help="不指定则列出全部已收录关卡")
+    costs.add_argument("--config-dir", type=Path, help="使用本机已绑定的官方资源层查询指定关卡")
     args = parser.parse_args(argv)
     try:
         if args.command == "plan":
@@ -202,9 +226,11 @@ def main(argv=None) -> int:
                         handle.write("\n")
         elif args.command == "stage-cost":
             catalog = cost_catalog()
-            value = ({"stage": args.stage, "cost": stage_cost(args.stage),
-                      "source": catalog["source"], "verified_at": catalog["verified_at"]}
-                     if args.stage else catalog)
+            if args.config_dir and not args.stage:
+                raise ValueError("--config-dir requires --stage")
+            value = resolve_cost(args.stage, config_dir=args.config_dir) if args.stage else catalog
+            if args.stage and value["source"] == "bundled":
+                value.update(source=catalog["source"], verified_at=catalog["verified_at"])
         elif args.command == "inspect":
             value = inspect_report(json.loads(args.report.read_text(encoding="utf-8")))
         else:

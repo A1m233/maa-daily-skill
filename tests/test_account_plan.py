@@ -205,7 +205,7 @@ class AccountPlanTests(unittest.TestCase):
                  "stage-a": [{"type": "Fight", "params": {"stage": "LS-6", "times": 0}}],
                  "stage-b": [{"type": "Fight", "params": {"stage": "AP-5", "times": 0}}]}
         instances = []
-        with patch.object(daily, "check_install"), patch.object(daily, "medicine_preflight"), \
+        with patch.object(daily, "check_install", return_value=self.root), patch.object(daily, "medicine_preflight"), \
              patch.object(daily.Daily, "resolve", side_effect=lambda n: copy.deepcopy(tasks[n])):
             for entry in entries:
                 output = self.root / ("evidence-" + entry["alias"])
@@ -219,10 +219,11 @@ class AccountPlanTests(unittest.TestCase):
                 result = output / "sanity/drain-test/result.json"
                 result.parent.mkdir(parents=True)
                 result.write_text(json.dumps({"status": "completed", "stage": ops.stage,
-                                              "remaining_sanity": 0}), encoding="utf-8")
+                                              "remaining_sanity": 0, "cost": ops.cost_info["cost"]}), encoding="utf-8")
                 with patch.object(daily.subprocess, "run", return_value=Mock(returncode=0)) as run:
                     ops.drain()
                 command = run.call_args.args[0]
+                self.assertEqual(command[command.index("--cost") + 1], str(ops.cost_info["cost"]))
                 self.assertEqual(command[command.index("--stage") + 1], ops.stage)
                 self.assertEqual(command[command.index("--max-runs") + 1], str(config["max_runs"]))
                 self.assertEqual(command[command.index("--policy") + 1], str(ops.policy))

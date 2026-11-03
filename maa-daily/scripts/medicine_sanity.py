@@ -181,7 +181,10 @@ def read_session(report: dict, stage: str, days: int, entry: str) -> dict:
 def scan(runtime, stage: str, days: int, *, dialog_open: bool = False, cost: int | None = None) -> dict:
     if not dialog_open:
         sanity = read_probe(runtime.run([probe_task(stage)], "medicine-precondition"), stage)
-        if sanity >= stage_cost(stage, cost):
+        threshold = stage_cost(stage) if cost is None else cost
+        if type(threshold) is not int or threshold <= 0:
+            raise ValueError("positive integer cost required")
+        if sanity >= threshold:
             raise ValueError("medicine_scan_requires_below_one_run")
     entry = "ScanRecoveryDialog" if dialog_open else "ScanRecoveryOpen"
     try:

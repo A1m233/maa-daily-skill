@@ -13,7 +13,7 @@ import subprocess
 import sys
 import uuid
 
-from daily_checks import inspect_report, plan, stage_cost
+from daily_checks import inspect_report, plan, resolve_cost
 from medicine_policy import load_policy, validate_policy, recovery_task, inspect_recovery
 from stage_runtime import VERIFY, normalize_stage, probe_task, isolated_config, STOP_NODES
 from run_with_evidence import run_dry, VERBOSE_ENV, output_detail
@@ -529,6 +529,7 @@ def main(argv=None) -> int:
     parser.add_argument("--maa", default="maa")
     parser.add_argument("--profile", required=True)
     parser.add_argument("--output-dir", type=Path, help="可选输出根；省略时使用固定受管产物目录")
+    parser.add_argument("--cost-config-dir", type=Path, help="用于核验成本的已绑定 MAA 配置目录")
     parser.add_argument("--cost", type=int, help="默认按关卡表取值；旧调用显式传入时必须一致，不能覆盖")
     parser.add_argument("--maximum", type=int, default=10)
     parser.add_argument("--max-phases", type=int, default=5)
@@ -552,7 +553,7 @@ def _main(args) -> int:
     artifact_status = "failed"
     try:
         args.stage = normalize_stage(args.stage)
-        cost = stage_cost(args.stage, args.cost)  # 在目录发现、导航或任何游戏操作前拦截错误成本。
+        cost = resolve_cost(args.stage, args.cost, config_dir=args.cost_config_dir)["cost"]
         policy = load_policy(args.policy) if args.policy else {"mode": "off", "medicine_expire_days": 1}
         runtime = Runtime(args.maa, args.profile, args.output_dir)
         runtime.configure_stage(args.stage)

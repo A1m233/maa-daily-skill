@@ -106,13 +106,13 @@ python <skill-root>/scripts/infrast_check.py inspect --report <本账号本轮�
 
 ## 基本关卡单场理智
 
-唯一机器事实源是 [assets/stage-costs.json](../assets/stage-costs.json)，来自 MAA v6.17.1 的 [stages.json](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/resource/stages.json) 中 `apCost`，最近核对 2026-09-11。可离线查询，不启动游戏：
+离线基础表是 [assets/stage-costs.json](../assets/stage-costs.json)，来自 MAA v6.17.1 的 [stages.json](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/v6.17.1/resource/stages.json) 中 `apCost`，最近核对 2026-09-11。可离线查询，不启动游戏：
 
 ```text
 python <skill-root>/scripts/daily_checks.py stage-cost --stage LS-6
 ```
 
-省略 `--stage` 列出全部。常用值：AP-5、CA-5、SK-5 为 30；CE-6、LS-6 为 36；PR-A/B/C/D 的 1 级为 18、2 级为 36；1-7 为 6。表内还包含资源关卡的较低等级。以脚本读取值为准，不另外手写一份运行时映射。
+完整日常优先读 MAA 的已绑定资源层。给查询命令加 `--config-dir <本机配置目录>` 可按同一顺序查表，并取得实际来源。表外活动首次配置见[日常成本解析](daily-execution.md#单场理智成本)。省略两个参数列出捆绑基础表。常用值：AP-5、CA-5、SK-5 为 30；CE-6、LS-6 为 36；PR-A/B/C/D 的 1 级为 18、2 级为 36；1-7 为 6。表内还包含资源关卡的较低等级。以脚本读取值为准，不另外手写一份运行时映射。
 
 `plan --stage` 和 `drain_sanity.py` 自动取已收录消耗。保留旧 `--cost` 调用，但已知关卡传入冲突值会在生成 task / 导航前拒绝，而不是覆盖事实。表外关卡只有通用 plan 接受经当前资源或游戏核实的显式 `--cost`；不能把未知默认为 30。纯算术调用不带 stage 时仍须给 cost。
 

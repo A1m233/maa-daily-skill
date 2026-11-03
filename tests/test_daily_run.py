@@ -20,6 +20,7 @@ class DailyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             ops = object.__new__(daily.Daily)
+            ops.cost_info, ops.config_root = {"cost":36}, root
             ops.output, ops.stage, ops.policy = root, "LS-6", root / "policy.toml"
             ops.maa, ops.profile, ops.day, ops.account = "fake-maa", "test", "2026-10-26", "example"
             ops.config = {"maximum":10, "max_runs":100, "max_phases":5}
@@ -60,6 +61,7 @@ class DailyTests(unittest.TestCase):
                 root = Path(directory)
                 ops = object.__new__(daily.Daily)
                 ops.output, ops.stage, ops.policy = root, "AP-5", root / "policy.toml"
+                ops.cost_info, ops.config_root = {"cost": 30}, root
                 ops.maa, ops.profile, ops.day, ops.account = "fake-maa", "test", "2026-10-10", "sample"
                 ops.config = {"maximum": 10, "max_runs": 100, "max_phases": 5}
                 ops.runtime = Mock(stage_config=root)
@@ -74,7 +76,7 @@ class DailyTests(unittest.TestCase):
                     medicine = medicine_sanity.read_session(evidence, "AP-5", 1, "ScanRecoveryDialog")
                     self.assertEqual(medicine["end_at"], page)
                 (target / "result.json").write_text(json.dumps({
-                    "status": "completed_with_reminder", "stage": "AP-5", "remaining_sanity": 5,
+                    "status": "completed_with_reminder", "stage": "AP-5", "remaining_sanity": 5, "cost": 30,
                     "completed_runs": 6, "end_at": page,
                     "medicine_check": medicine,
                     "reminder_required": True}), encoding="utf-8")

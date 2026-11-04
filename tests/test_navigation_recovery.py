@@ -19,7 +19,7 @@ class NavigationRecoveryTests(unittest.TestCase):
 
     def battle(self):
         return (event("SubTaskExtraInfo", what="FightTimes", details={"times_finished": 2}) +
-                event("SubTaskExtraInfo", what="StageDrops", details={"stage": {"stageCode": "AP-5"}}))
+                event("SubTaskExtraInfo", what="StageDrops", details={"stage": {"stageCode": "AP-5"}, "stars": 3, "drops": []}))
 
     def test_navigation_still_requires_stop_and_independent_probe(self):
         stop = event("SubTaskStart", details={"task": "FightBegin", "action": "Stop"})

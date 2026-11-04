@@ -18,6 +18,7 @@ from medicine_policy import load_policy, validate_policy, recovery_task, inspect
 from stage_runtime import VERIFY, normalize_stage, probe_task, isolated_config, STOP_NODES
 from run_with_evidence import run_dry, VERBOSE_ENV, output_detail
 from log_evidence import read_evidence
+from battle_outcome import inspect_outcome, require_success
 
 STAGES = {"AP-5": "VerifyAP5", "CE-6": "VerifyCE6", "LS-6": "VerifyLS6"}  # 只用于旧报告兼容，不限制新入口。
 PREFIX = "MaaDailyCheck@"
@@ -133,6 +134,7 @@ def fight_observation(report: dict) -> dict:
                                             or value.get("why") == "drop recognition error"):
                 drop_errors.append(value.get("subtask"))
         result.update(status="observed", drop_status="failed" if drop_errors else "reported" if drops else "unknown",
+                      battle_outcome=inspect_outcome(events),
                       reported_drop_stages=drops, drop_errors=drop_errors, chain_terminal=chains[-1][0],
                       source={k: report["evidence"].get(k) for k in
                               ("log_file", "before_size", "after_size", "interval_sha256", "segments")})
@@ -297,6 +299,7 @@ def _check_fight(report: dict, stage: str, expected: int) -> None:
             if (node in {"MedicineConfirm", "ExpiringMedicineConfirm", "StoneConfirm"}
                     and detail.get("action") not in {None, "DoNothing"}):
                 raise ValueError("unexpected_recovery_action")
+    require_success(events)
     if not counts or max(counts) != expected or not dropped_stages or any(s != stage for s in dropped_stages):
         raise ValueError("fight_count_or_stage_unverified")
 
@@ -434,6 +437,9 @@ def run_daily(observe, fight, recover, check, save, *, policy, cost, maximum, ma
         result.update(status="stopped", reason=str(error))
         preserve_failed_fight(result, error)
         if result["phases"] and result["phases"][-1]["status"] == "running":
+            if result["phases"][-1].get("kind") == "medicine_bulk":
+                # Failed settlement does not imply that recovery used no medicine.
+                result["medicine_used"] = None
             result["phases"][-1].update(status="unverified", reason=str(error))
     save(result)
     return result

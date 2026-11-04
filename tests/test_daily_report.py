@@ -159,7 +159,7 @@ class ReportTests(unittest.TestCase):
                 'latest_sanity':{'current':25, 'maximum':205, 'observed_at':'2026-09-18 22:54:17'}})
         out = summarize(r)
         self.assertEqual(out['status'], 'incomplete')
-        self.assertTrue(any('日志上报完成 5 场' in text for text in out['facts']))
+        self.assertTrue(any('MAA 日志计数 5 场' in text for text in out['facts']))
         self.assertFalse(any('完成 0 场' in text for text in out['facts']))
         self.assertTrue({'drain_evidence','drain_drops'} <= {n['code'] for n in out['notices']})
         del r['steps']['drain']['battle_observation']

@@ -64,13 +64,20 @@ def summarize(result):
         if observation.get("status") == "observed":
             count = observation.get("observed_completed_runs")
             if type(count) is int:
-                facts.append(f"未通过完整核验的战斗阶段，日志上报完成 {count} 场（仍需核验）")
+                facts.append(f"未通过完整核验的战斗阶段，MAA 日志计数 {count} 场（不代表成功通关数）")
+            outcome = observation.get("battle_outcome", {})
+            if outcome.get("status") == "failed":
+                note("drain_battle_failed", "检测到失败结算或理智返还，已停止后续清体力批次；请检查代理作战，不能直接重复整轮或提高运行上限。")
+            elif outcome.get("status") == "unknown":
+                note("drain_battle_unverified", "缺少可靠的三星成功结算证据，未计入成功通关，不能仅凭场次计数继续。")
             sanity = observation.get("latest_sanity") or {}
             if type(sanity.get("current")) is int:
                 facts.append(f"该阶段最近日志理智为 {sanity['current']}（{sanity.get('observed_at', '时间未知')}，非当前可复用读数）")
             note("drain_evidence", "战斗完整核验未通过，保留已观察结果；补跑前须重新核验当前状态，不按已核验场次为零直接重打。")
             if observation.get("drop_status") == "failed":
                 note("drain_drops", "掉落识别失败，不能确认本阶段掉落结果。")
+    if "medicine_used" in drain and drain["medicine_used"] is None:
+        note("medicine_use_unknown", "失败阶段的用药数量未核验，不能认定未用药；请保留原始资源动作记录。")
     medicine = drain.get("medicine_check", {})
     if medicine.get("status") == "detected":
         note("medicine", "仍检测到临期药，请在到期前处理；本轮不自动扩大用药范围。")

@@ -25,6 +25,7 @@ class SkillContractTests(unittest.TestCase):
             "scripts/reward_check.py",
             "scripts/infrast_check.py",
             "scripts/drain_sanity.py",
+            "scripts/battle_outcome.py",
             "scripts/medicine_policy.py",
             "scripts/medicine_sanity.py",
             "scripts/stage_runtime.py",

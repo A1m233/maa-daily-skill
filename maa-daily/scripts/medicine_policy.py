@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import tomllib
+from battle_outcome import require_success
 
 MODES = {"off", "use_and_drain"}
 
@@ -75,6 +76,7 @@ def inspect_recovery(report: dict, stage: str, days: int, max_runs: int) -> dict
                 raise ValueError("medicine_count_mismatch")
             uses.append(detail)
     completed = max(counts, default=0)
+    require_success(events, allow_no_battle=completed == 0)
     if not counts or (completed > 0 and not drops) or any(s != stage for s in drops) or (completed == 0 and drops):
         raise ValueError("recovery_fights_unverified")
     if confirmed and not uses:

@@ -310,7 +310,7 @@ class DrainTests(unittest.TestCase):
 
     def test_fight_requires_matching_stage_and_positive_exact_completion(self):
         body = event("TaskChainStart") + event("SubTaskExtraInfo", what="FightTimes", details={"times_finished": 6})
-        body += event("SubTaskExtraInfo", what="StageDrops", details={"stage": {"stageCode": "AP-5"}})
+        body += event("SubTaskExtraInfo", what="StageDrops", details={"stage": {"stageCode": "AP-5"}, "stars": 3, "drops": []})
         body += event("TaskChainCompleted")
         with tempfile.TemporaryDirectory() as directory:
             report = self.report(directory, body)

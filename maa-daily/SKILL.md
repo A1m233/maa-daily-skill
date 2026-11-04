@@ -44,6 +44,7 @@ description: 指导 Agent 使用 MaaAssistantArknights 的 maa-cli 检查环境�
 - 完整日常按[日常成本解析规则](references/daily-execution.md#单场理智成本)读取已绑定的 MAA 资源。新活动优先改本地选关 task；预检返回可靠成本即可沿用执行器。可用 `daily_checks.py stage-cost --config-dir <本机配置目录> --stage <关卡>` 离线核对。
 - 既有 task 接入动态清体力、替换固定批量与单倍补尾：读 [references/drain-integration.md](references/drain-integration.md)。候选脚本含只导航与循环，先按验证边界接入，不直接重跑旧 Fight。
 - 清体力接受标准关卡代码，起点与选关交给原生 MAA；脚本在隔离配置中阻断战斗入口，再独立核验准备页，不要求 Agent 看屏幕或先回首页。通用导航已有 AP-5、PR-D-2、1-7 的只导航实测；其余范围及未知关卡 `--cost` 来源见上述指南，不猜 `--start-at` 重试。
+- 战斗日志计数不能当作成功通关数；标准清体力复用[结算核验](references/drain-integration.md#战斗成功与失败结算)。失败、理智返还或成功证据不足时不累计该阶段、不重复下一批，也不能以升级回理智为由放行。
 - 博士升级也会恢复理智；组件在已核验战斗后重新读数计算，不单凭理智上涨停止，也不忽略识别错误。参见[升级恢复的已知边界](references/drain-integration.md#已知边界博士升级恢复理智)。
 - 临期药只配置“用／不用”，统一通过 `drain_sanity.py run --policy` 执行，两模式都收尾检测提醒。策略、固定倍率用药后无药补尾及迁移方法见 [references/expiring-medicine.md](references/expiring-medicine.md)；完整库存清空仍不能保证。
 - 安装、版本、目录或部分安装判断：读取 [references/install-and-discovery.md](references/install-and-discovery.md)。

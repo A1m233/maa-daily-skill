@@ -60,7 +60,26 @@ python <skill-root>/scripts/drain_sanity.py run --stage PR-D-2 --policy <本地�
 
 ## 已知边界：博士升级恢复理智
 
-博士升级会恢复理智，不能仅凭上涨断言用药。当前不预测升级、不识别升级弹窗；已核验正场次后，理智未下降或上涨记录 `sanity_non_decreasing`，按新读数重算。错误链、掉落识别失败或未核验场次仍停止；不以升级为理由忽略错误。总场次和阶段预算限制循环。
+博士升级会恢复理智，不能仅凭上涨断言用药。当前不预测升级、不识别升级弹窗；已核验正场次后，理智未下降或上涨记录 `sanity_non_decreasing`，按新读数重算。错误链、掉落识别失败、失败/返还结算或未核验场次仍停止；不以升级为理由忽略错误。总场次和阶段预算限制循环。
+
+## 战斗成功与失败结算
+
+`FightTimes.times_finished` 与任务链 Completed 是原生执行计数/边界，不是成功通关证明。无药批次与原生用药阶段共同使用 `battle_outcome.py`，在完整且归属明确的 Fight 证据区间内核验全部结算：
+
+- 实际识别到 `FightMissionFailed` / `FightMissionFailedAndStop` 节点，或结算为 0 星、出现正数理智返还时，判为 `battle_failed`。候选 next 列表出现失败节点不算失败。
+- 只有目标关卡、场次、资源授权和所有结算的三星证据都通过，才累计该阶段的成功场次。缺少星级、非三星或其它证据缺失为未核验；不要求随机材料必定掉落，也不能因出现同名 StageDrops 就认定成功。
+- 失败阶段不累计进已核验成功场次，不重读后继续下一批、不切换其它关卡补刷。原生进程内部仍遵循 MAA 自身的失败处理；本组件在该进程返回后拦截后续阶段，不承诺中途抢占游戏内连战。
+- 原生用药阶段确实零战斗、无失败结算且用药动作可核验时，仍允许按既有策略处理理智余量。失败阶段的用药数量未核验时返回未知，不能因战斗失败宣称没用药。
+
+失败后的简报保留 MAA 日志计数和结算信号，明确计数不代表成功通关数。用户应先检查或重新保存该关卡代理；失败原因不清时，不用重启、提高预算或反复单场测试代替排查。历史报告只读复核，不改写旧完成数或自动补跑。剿灭使用独立的周进度协议，不套用此标准关卡规则。
+
+只读复核已有原始 Fight runner 报告可直接调用，不需要 Agent 编写解析脚本：
+
+```text
+python <skill-root>/scripts/battle_outcome.py --report <original-fight-runner-report.json>
+```
+
+输入不是 daily-result.json 或 result.json，而是该阶段 processes.json 指向的原始 Fight 报告。组件校验日志区间与哈希，返回结算信号和原生日志计数；失败或未知退出 2 是预期复核结果，不是重试理由。它不改写报告，不证明账号/游戏日仍有效，也不提供续跑许可。
 
 ## 结果与复用
 
@@ -68,7 +87,7 @@ python <skill-root>/scripts/drain_sanity.py run --stage PR-D-2 --policy <本地�
 
 每个真实进程经薄 runner 保存区间哈希与内部告警。`processes.json` 记录临时 task、配置目录及导航隔离标志；产物按[保留策略](artifacts.md)保存和淘汰，运行中不删除，中断后不自动续跑。`--output-dir` 可省略以使用固定受管库。`result.json` 区分已核验场次、未知阶段、最新理智和药物提醒；开战后尚未重读时旧值只保留在 last_known_sanity，不用于补跑。
 
-`completed_runs_basis=fully_verified_only` 表明 `completed_runs` 仅累计完整核验通过的阶段。战斗阶段失败时，组件仍从原报告哈希绑定的唯一 Fight 链提取 `battle_observation`：`observed_completed_runs` 是 `finished=true` 的日志计数，`latest_sanity` 带原观察时间，掉落识别失败单独保留。它不改变失败状态、不累计进已核验场次，也不恢复自动续跑；`usable_for_planning=false`，不能把历史读数直接作为当前预算。报告里的已核验零场不等于游戏未打，尤其不能据此原样重跑。顶层观测仅对应最后失败阶段，不是跨进程累计总数；链归属不明、日志变化或计数冲突时观测也返回 unknown。原生用药阶段和无药补尾均适用。
+`completed_runs_basis=fully_verified_only` 表明 `completed_runs` 仅累计完整核验通过的阶段。战斗阶段失败时，组件仍从原报告哈希绑定的唯一 Fight 链提取 `battle_observation`：`observed_completed_runs` 是 `finished=true` 的日志计数（含失败结算的可能，不是成功通关数），`battle_outcome` 保留失败信号和结算星级，`latest_sanity` 带原观察时间，掉落识别失败单独保留。它不改变失败状态、不累计进已核验场次，也不恢复自动续跑；`usable_for_planning=false`，不能把历史读数直接作为当前预算。报告里的已核验零场不等于游戏未打，尤其不能据此原样重跑。顶层观测仅对应最后失败阶段，不是跨进程累计总数；链归属不明、日志变化或计数冲突时观测也返回 unknown。原生用药阶段和无药补尾均适用。
 
 退出 0 表示 probe 有效，或清理完成（可能带 completed_with_reminder），不是完整日常或临期库存清空。失败保留证据，不能自动回退旧 task。扫描失败可能遗留窗口，因此仅在有终态证据时报告 prepared。
 

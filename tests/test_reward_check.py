@@ -78,61 +78,38 @@ class RewardCheckTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 check.read_page_recheck(report, nav)
 
-    def test_low_navigation_requests_recheck_not_immediate_success(self):
+    def test_native_matched_navigation_does_not_request_score_recheck(self):
         from test_drain_sanity import DrainTests, event
         body = (event("TaskChainStart", taskchain="Custom") +
-                event("SubTaskCompleted", taskchain="Custom", details={"task": "RewardNavReady", "action": "DoNothing",
+                event("SubTaskCompleted", taskchain="Custom", details={"task": "RewardNavReady", "action": "DoNothing", "algorithm": "OcrDetect",
                       "result": {"text": "日常任务", "score": 0.845, "rect": [502, 10, 142, 43]}}) +
                 event("TaskChainCompleted", taskchain="Custom"))
         with tempfile.TemporaryDirectory() as directory:
-            self.assertEqual(check.read_navigation(DrainTests().report(directory, body))["status"], "recheck_required")
-
-    def test_scan_rechecks_once_and_never_scans_after_failed_recheck(self):
-        from subprocess import CompletedProcess
-        for passed in (True, False):
-            with tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                (root / "tasks").mkdir()
-                calls = []
-                def execute(command, **kwargs):
-                    calls.append(command)
-                    if "--report-file" in command:
-                        Path(command[command.index("--report-file")+1]).write_text('{}')
-                    return CompletedProcess(command, 0)
-                with patch.object(check, "check_install", return_value=root), \
-                        patch.object(check.subprocess, "run", side_effect=execute), \
-                        patch.object(check, "read_navigation", return_value={"status": "recheck_required"}), \
-                        patch.object(check, "read_page_recheck", side_effect=None if passed else ValueError("page_recheck_features_unverified"),
-                                     return_value={"status": "verified"}), \
-                        patch.object(check, "evaluate", return_value={"status": "evaluated"}), \
-                        contextlib.redirect_stdout(io.StringIO()):
-                    result, output = check.scan_once("maa", "test", root / "out")
-                self.assertEqual(len(calls), 6 if passed else 4)
-                self.assertEqual(result["status"], "evaluated" if passed else "unknown")
-                self.assertEqual((output / "evidence.json").exists(), passed)
-                recheck = json.loads((output / "page-recheck-task.json").read_text())
-                self.assertEqual(recheck["tasks"][0]["params"]["task_names"], [check.PREFIX+check.PAGE_READS[0]])
-                assets = json.loads((ROOT / "maa-daily/assets/daily-checks/tasks.json").read_text())
-                self.assertEqual(assets[check.PREFIX+check.PAGE_READS[0]]["action"], "DoNothing")
-                self.assertEqual(assets[check.PREFIX+check.PAGE_READS[1]]["next"], [])
+            for score in (0.0, 0.5, 0.845, 0.99):
+                candidate = body.replace("0.845", str(score))
+                with self.subTest(score=score):
+                    self.assertEqual(check.read_navigation(DrainTests().report(directory, candidate))["status"], "verified")
 
     def test_navigation_requires_task_page_and_no_business_clicks(self):
         from test_drain_sanity import DrainTests, event
         fixture = DrainTests()
         body = (event("TaskChainStart", taskchain="Custom") +
-                event("SubTaskCompleted", taskchain="Custom", details={"task": "RewardNavReady", "action": "DoNothing",
+                event("SubTaskCompleted", taskchain="Custom", details={"task": "RewardNavReady", "action": "DoNothing", "algorithm": "OcrDetect",
                       "result": {"text": "t24/日常任务", "score": 0.91, "rect": [640, 11, 144, 40]}}) +
                 event("TaskChainCompleted", taskchain="Custom"))
         with tempfile.TemporaryDirectory() as directory:
             report = fixture.report(directory, body)
             self.assertEqual(check.read_navigation(report)["end_at"], "task_page")
-            for bad in (body.replace(json.dumps("t24/日常任务"), json.dumps("周常任务")), body.replace("0.91", "0.5"),
+            for bad in (body.replace(json.dumps("t24/日常任务"), json.dumps("周常任务")), body.replace("0.91", "NaN"),
                         body.replace("640, 11", "640, 400"), body + event("SubTaskError"),
+                        body.replace("OcrDetect", "JustReturn"),
+                        body.replace('"taskid": 1', '"taskid": 2', 1),
+                        body.replace('"score": 0.91', '"score": true'),
                         body + event("SubTaskCompleted", taskchain="Custom", details={"task": "ReceiveAward", "action": "ClickSelf"})):
                 with self.assertRaises(ValueError):
                     check.read_navigation(fixture.report(directory, bad))
 
-    def test_high_confidence_path_has_no_extra_recheck_process(self):
+    def test_native_matched_path_has_no_extra_recheck_process(self):
         from subprocess import CompletedProcess
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

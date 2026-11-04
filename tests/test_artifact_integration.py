@@ -45,27 +45,26 @@ class RewardArtifactTests(unittest.TestCase):
             report.write_text("{}", encoding="utf-8")
         return SimpleNamespace(returncode=0)
 
-    def invoke(self, *, parent=None, run=None, recheck=False):
+    def invoke(self, *, parent=None, run=None):
         with patch.object(reward_check, "check_install", return_value=self.config), \
                 patch.object(reward_check.subprocess, "run", side_effect=run or self.fake_run), \
-                patch.object(reward_check, "read_navigation", return_value={"status": "recheck_required" if recheck else "verified"}), \
-                patch.object(reward_check, "read_page_recheck", return_value={"status": "verified"}), \
+                patch.object(reward_check, "read_navigation", return_value={"status": "verified"}), \
                 patch.object(reward_check, "evaluate", return_value={"status": "evaluated", "reminder_required": False}), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             return reward_check.scan_once("fake-maa", "profile", parent.path / "rewards" if parent else None, parent=parent)
 
     def test_standalone_default_cleanup_and_preserved_evidence(self):
-        result, output = self.invoke(recheck=True)
+        result, output = self.invoke()
         self.assertEqual(result["status"], "evaluated")
         self.assertEqual(len(list((self.config / "tasks").iterdir())), 1)
         self.assertTrue(self.formal.is_file())
         self.assertTrue((output / "navigation-task.json").is_file())
-        self.assertTrue((output / "page-recheck-task.json").is_file())
+        self.assertFalse((output / "page-recheck-task.json").exists())
         self.assertTrue((output / "result.json").is_file())
         record, = self.index()["runs"]
         self.assertEqual(record["state"], "finished")
         self.assertEqual(record["files"], [])
-        self.assertEqual(len(self.calls), 6)
+        self.assertEqual(len(self.calls), 4)
 
     def test_nested_scan_has_one_owner_and_does_not_finish_parent(self):
         parent = ArtifactRun.begin(self.config, None, "daily", prefix="daily-")

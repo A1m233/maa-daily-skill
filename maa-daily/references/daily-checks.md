@@ -27,7 +27,7 @@ python <skill-root>/scripts/run_with_evidence.py --report-file <local>/sanity.js
 python <skill-root>/scripts/daily_checks.py inspect --report <local>/sanity.json
 ```
 
-- `maa-daily-check-sanity`：起点必须是目标关卡准备页。确认“开始行动”区域后两次 OCR 理智，仅在高置信且一致时输出读数，绝不点击开战。它暂不承载从主页自动选关。
+- `maa-daily-check-sanity`：起点必须是目标关卡准备页。确认“开始行动”区域后两次 OCR 理智，仅在格式、取值范围合法且两次一致时输出读数，绝不点击开战。它暂不承载从主页自动选关。
 - `maa-daily-check-rewards`：旧的单页 OCR 诊断入口，不承担档位计数；完整收尾改用下文的 `reward_check.py scan`。
 - `maa-daily-check-screen`：仅 OCR 当前页面，供未知起点诊断，不点击、不导航，不从通用 OCR 直接确认理智或奖励状态。客户端更新提示使用[专用检查入口](safety-and-results.md#客户端更新检查) `client_check.py scan`，它校验并复用这个 task 和既有 `ScreenText` 资源；已有一致部署无需新增资源，缺失时仍需 `prepare`。
 - `inspect`：仅读取该 runner 报告的日志字节区间，并校验区间哈希。错误、日志变化、缺少识别结果均不能当作零理智或奖励已领取。报告只放本地，不提交账号页面 OCR。
@@ -46,6 +46,16 @@ python <skill-root>/scripts/reward_check.py --layout cn-daily-ten-v1 preflight -
 
 随后由 Agent 读取本轮实际 profile 确认 `resource.user_resource = true`，并 dry-run `maa-daily-reward-scan`；继承或覆盖配置按原生配置规则核对。需要部署时用上文 `prepare`，再重复预检。扫描时仍会再次校验资源，防止预检后变化。部署授权与不能静默降级的责任由[收尾检查依赖预检](safety-and-results.md#收尾检查依赖预检)维护。
 
+## 识别结果与业务推断的边界
+
+MAA 普通 OcrDetect 按 ROI、目标文字及 fullMatch 等规则匹配；[官方 OCRer](https://github.com/MaaAssistantArknights/MaaAssistantArknights/blob/dev-v2/src/MaaCore/Vision/OCRer.cpp) 的结果筛选没有统一最低 OCR 分数。`templThreshold` 属于图片模板匹配，不能拿来解释 OCR 分数；分数也不是经校准的正确率。
+
+- **目标节点匹配**：准备页关卡/按钮及奖励页导航复用原生匹配，不额外设置统一高分门槛。仍校验真实回调、任务链来源、动作和区域，避免把其它页面文字当成目标。
+- **理智数字**：读数参与资源计算，必须满足数字格式、上限合理性、两次一致与回调/日志相符；不依赖 0.98 等任意分数保证数值正确。元数据非法和任一业务条件冲突均拒绝。
+- **原始 OCR 的独立业务推断**：奖励完成标记、临期时间、客户端更新文案、基建收取类别来自无目标文字的扫描或其它原始证据。原生节点完成仅证明扫描执行，不能证明这些业务结论。现有局部候选分数与布局/双读/完整文案等联合规则保留，各自输出未知和提醒，不外推为通用 OCR 规则。修改这类分类器须有对应的正反例与业务验证，不能因某个页面低分就全局放宽。
+
+普通日常遇到识别缺口时读取组件报告，不让 Agent 临时改阈值重试。维护组件时优先复用官方识别，新增业务推断则明确独立证据、未知语义和验证样本。
+
 ## 奖励档位：一次调用完成扫描与判定
 
 先过账号身份、可见窗口、设备/profile 和运行授权门禁。`scan` 自行导航到任务页，不要求 Agent 看屏幕或把 Award 结束页猜成任务页：邮件/活动领取可能把页面带离任务列表。导航复用官方首页任务入口和快捷返回模板，禁止领奖；已经在任务页时直接核验。未知弹窗、登录页或在途战斗不是自动恢复的许可，识别失败停止。脚本不会启动游戏、切号、领奖、补刷或修改 profile。
@@ -56,9 +66,9 @@ python <skill-root>/scripts/reward_check.py --layout cn-daily-ten-v1 scan --prof
 
 `--maa <executable>` 可选择当前已核验的 maa-cli。脚本核对部署一致后，先经薄 runner 运行独立导航，再运行原生 `maa run maa-daily-reward-scan`，两者均先 dry-run。在受管子目录写 navigation.json、evidence.json 和 result.json，临时 task 副本留在包内；原生 tasks 目录中的本次临时文件按[产物策略](artifacts.md)清理。`--output-dir` 可省略以使用固定受管库。结果区分 navigation_failed、page_verification_failed 与 scan_runner_failed；前两项失败不会开始档位扫描。不要由 Agent 手工累计回调条数或重新编写同等扫描流程。
 
-页面标签置信度至少 0.9 时保留快速路径；顶部正确区域包含“日常任务”且分数在 0.8–0.9 时，由组件自动追加**一次同页只读复核**，不再次导航：两次 DoNothing OCR 均须出现位置稳定的日常标签，以及高置信周常、主线标签，顺序和区域正确。同一游戏日内，导航至复核结束合计不超过三分钟。缺标签、错位、冲突、错误回调或更低分数仍停止，不能由 Agent 自行降阈值重试。复核报告为 `page-recheck.json`；此机制只核验页面，不改变档位标记阈值和上下界算法。
+页面导航由原生 OcrDetect 匹配顶部指定区域的“日常任务”标签；解析器核对节点、算法、动作、链归属和区域，不再以单次 OCR 分数拒绝匹配或追加复核进程。缺标签、错位、错误回调仍停止。页面核验通过不表示任何档位已经领取，档位扫描及上下界算法继续独立执行。
 
-新增 `RewardPageRecheckA/B` 资源后，更新 Skill 仍须经授权执行 `daily_checks.py prepare` 再 preflight；旧部署缺少节点时在操作游戏前拒绝，不静默绕过复核。
+旧 `RewardPageRecheckA/B` 节点与 `read_page_recheck` 仅保留供历史报告回放和既有部署兼容，新 `scan` 不再调用；不要由 Agent 手动补跑旧复核。此次解析器更新没有新增资源，已通过部署预检的环境不需要为此重写资源。
 
 本适配器的显式前提：国服日常有十档，合成玉第七档、扫荡券第九档，已领取档位带“已完成”标记并排在未领取档位后面。映射由本次游戏现场与用户确认，不能外推为跨客户端永久协议。`cn-daily-ten-v1` 固定的是游戏界面布局，不含账号、设备或私人路径；其它布局需验证新的适配器，不随意改常量凑结果。
 
@@ -161,6 +171,6 @@ v6.17.1 的 `series=0` 新倍率路径，在初始状态优先选最大允许次
 
 2026-09-15 奖励入口拆分为导航和扫描两个证据进程。首轮已进入任务页，但标签 OCR 带图标前缀，精确整串匹配误拦截；改为顶部限定区域包含“日常任务”且置信度至少 0.9 后复验。正式验收覆盖 mail=true 的 Award 回首页之后、任务页重复调用、AP-5 准备页三种起点，均完整扫描并返回 10/10。仅导航与识别，不增加领奖动作；这不证明任意弹窗/主题可恢复，档位计数阈值与上下界算法未改。
 
-2026-09-19 新增低分页面同页复核。既有日志区间哈希回放中，0.844952 的日常标签进入 recheck_required，而非直接拒绝或直接通过；合成测试覆盖稳定联合标签、缺失、错位、低分、跨日、哈希变化、复核失败停止及高分不追加进程。新增资源本机 prepare/preflight 和原生 dry-run 通过。
+以下为旧版验证记录，当前正常入口已取消分数触发的同页复核。2026-09-19 新增低分页面同页复核。既有日志区间哈希回放中，0.844952 的日常标签进入 recheck_required，而非直接拒绝或直接通过；合成测试覆盖稳定联合标签、缺失、错位、低分、跨日、哈希变化、复核失败停止及高分不追加进程。新增资源本机 prepare/preflight 和原生 dry-run 通过。
 
 同日 MaaCore 6.17.1 / maa-cli 0.7.5 / Windows MuMu 现场验证覆盖三个场景：从首页调用完整 scan 时自然出现 0.844952 标签，自动复核两次联合标签并进入四次档位扫描；任务页原地调用复核节点再次通过；隔离导航到 1-7 准备页后，直接运行同样的 DoNothing 复核节点，解析器以 page_recheck_features_unverified 正确拒绝。第三项是独立负例，不表示正式 scan 会跳过导航去复核错误页面。所有原报告区间哈希匹配；未切号、开战、用药或调用 Award，导航隔离报告的两条内部告警保留。当天档位扫描没有可靠正向标记，结果保持 no_positive_marker / 两项奖励 unknown，不把页面核验通过等同于奖励已领。仅覆盖当前国服布局，未增加新领取状态或其它主题的真值样本。

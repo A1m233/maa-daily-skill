@@ -237,19 +237,18 @@ def read_navigation(report: dict) -> dict:
             raise ValueError("unexpected_reward_navigation_click")
         if kind == "SubTaskCompleted" and name == "RewardNavReady":
             match = detail.get("result", {})
-            if (detail.get("action") != "DoNothing" or "日常任务" not in match.get("text", "")
-                    or not valid_ocr(match, match.get("text"), 0.8, (480, 0, 800, 65))):
+            if (detail.get("action") != "DoNothing" or detail.get("algorithm") != "OcrDetect"
+                    or "日常任务" not in match.get("text", "")
+                    or not valid_ocr(match, match.get("text"), None, (480, 0, 800, 65))):
                 raise ValueError("reward_page_unverified")
             matches.append(match)
     if len(matches) != 1:
         raise ValueError("reward_page_unverified")
-    if matches[0]["score"] < 0.9:
-        return {"status": "recheck_required", "end_at": "unknown", "initial_match": matches[0]}
-    return {"status": "verified", "end_at": "task_page", "basis": "high_confidence_label"}
+    return {"status": "verified", "end_at": "task_page", "basis": "native_matched_label"}
 
 
 def read_page_recheck(report: dict, navigation_report: dict) -> dict:
-    """低分候选只复读同页两次，要求相邻标签联合支持，不重复导航。"""
+    """仅供旧版 page-recheck 报告回放；新运行不再按分数触发此流程。"""
     from drain_sanity import callbacks, valid_ocr
     start = dt.datetime.fromisoformat(navigation_report["started_at"])
     nav_end = dt.datetime.fromisoformat(navigation_report["ended_at"])
@@ -325,7 +324,6 @@ def scan_once(maa: str, profile: str, output: Path | None = None, *, parent=None
     env = artifacts.environment()
     report_file = run_dir / "evidence.json"
     nav_report = run_dir / "navigation.json"
-    recheck_report = run_dir / "page-recheck.json"
     name = "maa-reward-nav-" + uuid.uuid4().hex
     nav_task = config / "tasks" / (name + ".json")
     runner = str(Path(__file__).with_name("run_with_evidence.py"))
@@ -353,14 +351,6 @@ def scan_once(maa: str, profile: str, output: Path | None = None, *, parent=None
             navigation = json.loads(nav_report.read_text(encoding="utf-8"))
             result = unknown("page_verification_failed")
             nav = read_navigation(navigation)
-            if nav["status"] == "recheck_required":
-                recheck_name = name + "-page"
-                recheck_task = config / "tasks" / (recheck_name + ".json")
-                create_task(recheck_task, PREFIX + PAGE_READS[0], "page-recheck-task.json")
-                result["page_recheck_report"] = str(recheck_report)
-                if execute(recheck_name, recheck_report):
-                    raise ValueError("page_recheck_runner_failed")
-                nav = read_page_recheck(json.loads(recheck_report.read_text(encoding="utf-8")), navigation)
             result = unknown("scan_failed")
             if execute(TASK, report_file):
                 result = unknown("scan_runner_failed")
@@ -371,8 +361,6 @@ def scan_once(maa: str, profile: str, output: Path | None = None, *, parent=None
             result["error"] = str(error)
         settled = True
         result["navigation_report"] = str(nav_report)
-        if recheck_report.exists():
-            result["page_recheck_report"] = str(recheck_report)
         result["scan_report"] = str(report_file)
         (run_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return result, run_dir

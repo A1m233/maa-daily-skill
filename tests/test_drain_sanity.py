@@ -22,14 +22,14 @@ def event(kind, **values):
 
 
 def probe_body(stage="AP-5", score=0.925990, mutate=lambda rows: None):
-    rows = [(drain.STAGES[stage], {"text": stage, "score": score, "rect": [924, 82, 85, 27]}),
+    rows = [(drain.STAGES.get(stage, "VerifyStage"), {"text": stage, "score": score, "rect": [924, 82, 85, 27]}),
             ("StagePage", {"text": "开始行动", "score": 0.999989, "rect": [1126, 645, 104, 26]}),
             ("Sanity", {"text": "205/205", "score": 0.999925, "rect": [1141, 25, 118, 30]}),
             ("SanityConfirm", {"text": "205/205", "score": 0.999925, "rect": [1141, 25, 118, 30]})]
     mutate(rows)
     body = event("TaskChainStart", taskchain="Custom")
     for node, match in rows:
-        body += event("SubTaskCompleted", taskchain="Custom", first=[drain.PREFIX + drain.STAGES[stage]], details={
+        body += event("SubTaskCompleted", taskchain="Custom", first=[drain.PREFIX + drain.STAGES.get(stage, "VerifyStage")], details={
             "task": node, "action": "DoNothing", "algorithm": "OcrDetect", "result": match})
         if node.startswith("Sanity"):
             body += (f"OcrDetect MaaDailyCheck@{node} [{{ text: {match['text']}, "
@@ -338,13 +338,10 @@ class DrainTests(unittest.TestCase):
     def test_joint_probe_rejects_each_missing_or_conflicting_signal(self):
         changes = [lambda r: r[0][1].update(text="AP-4", score=1),
                    lambda r: r[0][1].update(text="AP-", score=1),
-                   lambda r: r[0][1].update(score=0.899),
                    lambda r: r[0][1].update(score=float("nan")),
                    lambda r: r[0][1].update(rect=[20, 82, 85, 27]),
                    lambda r: r[1][1].update(text="开始推演"),
-                   lambda r: r[1][1].update(score=0.97),
                    lambda r: r[1][1].update(rect=[1126, 500, 104, 26]),
-                   lambda r: r[2][1].update(score=0.925990),
                    lambda r: r[3][1].update(text="204/205"),
                    lambda r: r[3][1].update(rect=[10, 25, 118, 30]),
                    lambda r: r.pop(1), lambda r: r.reverse(), lambda r: r.append(r[0])]
@@ -354,6 +351,33 @@ class DrainTests(unittest.TestCase):
                     drain.read_probe(self.report(directory, probe_body(mutate=mutate)), "AP-5")
             for stage, score in (("AP-5", 0.925990), ("CE-6", 0.997455), ("LS-6", 0.998928)):
                 self.assertEqual(drain.read_probe(self.report(directory, probe_body(stage, score)), stage), 205)
+
+    def test_native_matched_probe_accepts_scores_without_extra_cutoff(self):
+        # Real AP-5/TL-7 observations plus low-score variants. Text and geometry,
+        # callbacks and repeated numbers must still agree at every score.
+        with tempfile.TemporaryDirectory() as directory:
+            for stage in ("AP-5", "TL-7", "1-7"):
+                for score in (0.0, 0.5, 0.843049, 0.925990, 1.0):
+                    def mutate(rows):
+                        for _, match in rows:
+                            match["score"] = score
+                    with self.subTest(stage=stage, score=score):
+                        report = self.report(directory, probe_body(stage, mutate=mutate))
+                        self.assertEqual(drain.read_probe(report, stage), 205)
+
+    def test_probe_rejects_invalid_score_metadata_and_numeric_conflicts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for index in range(4):
+                for score in (True, None, "0.99", -0.1, 1.01, float("nan"), float("inf")):
+                    with self.subTest(index=index, score=score), self.assertRaises(ValueError):
+                        body = probe_body(mutate=lambda rows: rows[index][1].update(score=score))
+                        drain.read_probe(self.report(directory, body), "AP-5")
+            for value in ("205", "205/0", "205/1001", "205/2O5", "-1/205"):
+                def mutate(rows):
+                    for _, match in rows[2:]:
+                        match["text"] = value
+                with self.subTest(text=value), self.assertRaises(ValueError):
+                    drain.read_probe(self.report(directory, probe_body(mutate=mutate)), "AP-5")
 
     def test_wrong_cost_never_constructs_runtime_or_navigates(self):
         for stage in ("LS-6", "CE-6"):

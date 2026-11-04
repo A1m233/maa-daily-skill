@@ -199,12 +199,19 @@ def read_navigation(report: dict, stage: str) -> str:
     return "prepared"  # 下一进程独立 OCR 验证目标；不是最终开战许可。
 
 
-def valid_ocr(match: dict, text: str, minimum: float, roi: tuple) -> bool:
+def valid_ocr(match: dict, text: str, minimum: float | None, roi: tuple) -> bool:
+    """Validate matched text/geometry. None adds no OCR confidence cutoff.
+
+    MAA OcrDetect already matches its configured text. A score is metadata,
+    not a calibrated correctness probability. Explicit cutoffs are reserved
+    for independent raw-OCR classifiers (including legacy report replay).
+    """
     if not isinstance(match, dict):
         return False
     rect, score = match.get("rect"), match.get("score")
     if (match.get("text") != text or type(score) not in (int, float)
-            or not math.isfinite(score) or not minimum <= score <= 1
+            or not math.isfinite(score) or not 0 <= score <= 1
+            or (minimum is not None and score < minimum)
             or not isinstance(rect, list) or len(rect) != 4
             or not all(type(v) in (int, float) and math.isfinite(v) for v in rect)):
         return False
@@ -243,13 +250,13 @@ def read_probe(report: dict, stage: str, *, medicine_entry: str | None = None) -
     if [name for name, _ in completed] != [entry.removeprefix(PREFIX), "StagePage", "Sanity", "SanityConfirm"]:
         raise ValueError("incomplete_or_ambiguous_probe")
     stage_match, page_match, first, second = [match for _, match in completed]
-    # 0.90 是联合条件下的保守候选下限，不是正确率；不用于理智数字。
-    if (not valid_ocr(stage_match, stage, 0.90, (845, 72, 220, 50))
-            or not valid_ocr(page_match, "开始行动", 0.98, (1010, 625, 260, 61))):
+    # Trust native text matching; independently check business identity and ROI.
+    if (not valid_ocr(stage_match, stage, None, (845, 72, 220, 50))
+            or not valid_ocr(page_match, "开始行动", None, (1010, 625, 260, 61))):
         raise ValueError("stage_or_page_unverified")
     for match in (first, second):
         if (not re.fullmatch(r"\d+\s*/\s*\d+", match.get("text", ""))
-                or not valid_ocr(match, match["text"], 0.98, (1120, 20, 160, 40))):
+                or not valid_ocr(match, match["text"], None, (1120, 20, 160, 40))):
             raise ValueError("sanity_unverified")
     pairs = [tuple(map(int, re.findall(r"\d+", match["text"]))) for match in (first, second)]
     reading = inspect_report(report, probe_origin=medicine_entry).get("sanity")
@@ -585,7 +592,7 @@ def _main(args) -> int:
                                lambda: scan(runtime, args.stage, policy["medicine_expire_days"], cost=cost),
                                lambda r: write_json(runtime.output / "result.json", r), policy=policy,
                                cost=cost, maximum=args.maximum, max_phases=args.max_phases, max_runs=args.max_runs)
-        result.update(stage=args.stage, cost=cost, probe_policy="cn-standard-joint-v2",
+        result.update(stage=args.stage, cost=cost, probe_policy="cn-native-match-joint-v3",
                       navigation_policy="native-isolated-stop-v1" if args.start_at != "prepared" else "prepared-v1",
                       end_at=("prepared" if result["status"] in {"completed", "observed"}
                               else result.get("medicine_check", {}).get("end_at", "unknown")))

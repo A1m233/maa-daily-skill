@@ -126,7 +126,9 @@ def inspect_report(report: dict, *, probe_origin: str | None = None) -> dict:
             values = re.findall(r"text: (\d+)\s*/\s*(\d+), rect: \[[^]]+\], score: ([\d.]+)", entry["result"])
             if len(values) == 1:
                 current, cap = map(int, values[0][:2])
-                if current >= 0 and 0 < cap <= 1000 and float(values[0][2]) >= 0.98:
+                # Numeric meaning is checked by format, range and agreement;
+                # do not discard matching native OCR by a second score cutoff.
+                if current >= 0 and 0 < cap <= 1000 and 0 <= float(values[0][2]) <= 1:
                     readings.append({"current": current, "maximum": cap})
                     reading_nodes.add(entry["node"])
     if (PREFIX + "StagePage" in seen and len(reading_nodes) == 2

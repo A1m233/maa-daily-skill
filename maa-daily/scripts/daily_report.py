@@ -55,6 +55,8 @@ def summarize(result):
         if item.get("status") == "completed" and p:
             facts.append(f"剿灭周进度 {p[0]}/{p[1]}")
     drain = steps.get("drain", {})
+    if drain.get("warning_report_files"):
+        note("execution_warnings", "运行存在告警，具体记录已保留；不据此猜测商品缺货、余额不足或其它业务原因。")
     if drain.get("status") in DONE and type(drain.get("remaining_sanity")) is int:
         facts.append(f"{drain.get('stage', '目标关卡')} 完成 {drain.get('completed_runs', '未知')} 场，剩余理智 {drain['remaining_sanity']}")
     elif drain.get("status") not in DONE:
@@ -95,6 +97,8 @@ def summarize(result):
             note(f"base_{i}", ("基建已观察到收取动作，但未确认全部待办清空。" if observed
                                  else "基建收取结果未确认，请检查是否仍有待收产物。"))
     rewards = checks.get("rewards", {})
+    if any(rewards.get("diagnostics", {}).values()) or any(rewards.get("navigation", {}).get("diagnostics", {}).values()):
+        note("execution_warnings", "运行存在告警，具体记录已保留；不据此猜测商品缺货、余额不足或其它业务原因。")
     claimed = []
     for key, label in (("daily_orundum", "每日合成玉"), ("daily_annihilation_ticket", "剿灭扫荡券")):
         value = rewards.get(key)

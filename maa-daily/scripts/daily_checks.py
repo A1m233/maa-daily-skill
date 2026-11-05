@@ -81,17 +81,13 @@ def inspect_report(report: dict, *, probe_origin: str | None = None) -> dict:
     result = {"sanity": None, "ocr": [], "daily_orundum": "unknown",
               "daily_annihilation_ticket": "unknown", "reminder_required": True,
               "reason": "use_reward_check_for_tier_status"}
-    evidence = report.get("evidence", {})
-    if (report.get("wrapper_exit_code") != 0 or evidence.get("state") != "bounded"
-            or evidence.get("callback_parse_error_lines")
-            or evidence.get("internal_error_lines")):
-        result["reason"] = "invalid_run_evidence"
-        return result
+    from check_evidence import read_check
     try:
-        data = read_evidence(evidence)
-    except ValueError:
-        result["reason"] = "log_interval_changed_or_unhashed"
+        data, diagnostics = read_check(report)
+    except ValueError as error:
+        result["reason"] = str(error)
         return result
+    result["diagnostics"] = diagnostics
     seen = set()
     completed = 0
     for line in data.decode("utf-8", errors="replace").splitlines():

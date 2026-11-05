@@ -131,22 +131,17 @@ def game_day(instant: dt.datetime) -> str:
 
 
 def evaluate(report: dict) -> dict:
-    evidence = report.get("evidence", {})
-    if (report.get("child_exit_code") != 0 or report.get("wrapper_exit_code") != 0
-            or evidence.get("state") != "bounded"
-            or evidence.get("internal_error_lines") or evidence.get("callback_parse_error_lines")
-            or evidence.get("subtask_error_lines")):
-        return unknown("invalid_run_evidence")
+    from check_evidence import read_check
+    try:
+        data, diagnostics = read_check(report)
+    except ValueError as error:
+        return unknown(str(error))
     start_time = dt.datetime.fromisoformat(report["started_at"])
     end_time = dt.datetime.fromisoformat(report["ended_at"])
     if (start_time.tzinfo is None or end_time.tzinfo is None
             or not 0 <= (end_time-start_time).total_seconds() <= 180
             or game_day(start_time) != game_day(end_time)):
         return unknown("time_boundary_invalid")
-    try:
-        data = read_evidence(evidence)
-    except ValueError:
-        return unknown("log_interval_changed")
     pages, done = {}, []
     chains, selection_ok = [], False
     for line in data.decode("utf-8").splitlines():
@@ -184,6 +179,9 @@ def evaluate(report: dict) -> dict:
             or done != list(PHASES) or not selection_ok):
         return unknown("incomplete_scan_chain")
     result = classify(pages)
+    result["diagnostics"] = diagnostics
+    if diagnostics["before_chain"] or diagnostics["after_chain"]:
+        result["reminder_required"] = True
     result["game_day"] = game_day(end_time)
     result["observed_at"] = report["ended_at"]
     return result
@@ -244,7 +242,10 @@ def read_navigation(report: dict) -> dict:
             matches.append(match)
     if len(matches) != 1:
         raise ValueError("reward_page_unverified")
-    return {"status": "verified", "end_at": "task_page", "basis": "native_matched_label"}
+    from check_evidence import read_check
+    _, diagnostics = read_check(report)
+    return {"status": "verified", "end_at": "task_page", "basis": "native_matched_label",
+            "diagnostics": diagnostics}
 
 
 def read_page_recheck(report: dict, navigation_report: dict) -> dict:
@@ -259,8 +260,6 @@ def read_page_recheck(report: dict, navigation_report: dict) -> dict:
             or (end-start).total_seconds() > 180 or game_day(start) != game_day(end)):
         raise ValueError("page_recheck_time_boundary")
     events = callbacks(report)
-    if report["evidence"].get("internal_error_lines"):
-        raise ValueError("page_recheck_internal_error")
     chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
     if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Custom")
             or chains[1] != ("TaskChainCompleted", "Custom", chains[0][2])):
@@ -357,6 +356,8 @@ def scan_once(maa: str, profile: str, output: Path | None = None, *, parent=None
             else:
                 result = evaluate(json.loads(report_file.read_text(encoding="utf-8")))
             result["navigation"] = nav
+            if any(nav["diagnostics"].values()):
+                result["reminder_required"] = True
         except (ArtifactError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
             result["error"] = str(error)
         settled = True

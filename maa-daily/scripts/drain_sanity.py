@@ -53,6 +53,9 @@ def callbacks(report: dict, *, allow_navigation_recovery: bool = False) -> list[
     if report.get("wrapper_exit_code") != 0 or report.get("child_exit_code") != 0:
         raise ValueError("process_failed_or_unbounded")
     events = recorded_callbacks(report)
+    if any(k == "TaskChainStart" and v.get("taskchain") == "Custom" for k, v in events):
+        from check_evidence import read_check
+        read_check(report)
     if any(k in {"TaskChainError", "TaskChainStopped", "InternalError", "InitFailed"} for k, _ in events):
         raise ValueError("invalid_or_failed_callback")
     errors = [i for i, (kind, _) in enumerate(events) if kind == "SubTaskError"]

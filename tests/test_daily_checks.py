@@ -160,12 +160,13 @@ class DailyChecksTests(unittest.TestCase):
 
     def test_bounded_inspection_never_infers_rewards_from_ocr(self):
         def event(kind, payload):
+            payload["taskid"] = 1
             if kind == "SubTaskCompleted":
                 payload["details"]["task"] = payload["details"]["task"].split("@")[-1]
                 payload["first"] = ["MaaDailyCheck@StagePage"]
                 payload["taskchain"] = "Custom"
             return "Assistant::append_callback | " + kind + " " + json.dumps(payload) + "\n"
-        data = ("OcrDetect MaaDailyCheck@Sanity [{ text: 103/205, rect: [ 1, 2, 3, 4 ], score: 0.99 }]\n"
+        data = (event("TaskChainStart", {"taskchain": "Custom"}) + "OcrDetect MaaDailyCheck@Sanity [{ text: 103/205, rect: [ 1, 2, 3, 4 ], score: 0.99 }]\n"
                 + "OcrDetect MaaDailyCheck@SanityConfirm [{ text: 103/205, rect: [ 1, 2, 3, 4 ], score: 0.99 }]\n"
                 + event("SubTaskCompleted", {"details": {"task": "MaaDailyCheck@StagePage"}})
                 + event("SubTaskCompleted", {"details": {"task": "MaaDailyCheck@Sanity"}})
@@ -174,7 +175,7 @@ class DailyChecksTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / "asst.log"
             log.write_bytes(b"old\n" + data + b"later\n")
-            report = {"wrapper_exit_code": 0, "evidence": {
+            report = {"child_exit_code": 0, "wrapper_exit_code": 0, "evidence": {
                 "state": "bounded", "log_file": str(log), "before_size": 4,
                 "after_size": 4 + len(data), "interval_sha256": hashlib.sha256(data).hexdigest()}}
             result = checks.inspect_report(report)

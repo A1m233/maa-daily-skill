@@ -34,8 +34,7 @@ def read_scan(report: dict, days: int, entry: str) -> dict:
     events = callbacks(report)
     chains = [(k, v.get("taskchain"), v.get("taskid")) for k, v in events if k.startswith("TaskChain")]
     if (len(chains) != 2 or chains[0][:2] != ("TaskChainStart", "Custom")
-            or chains[1][:2] != ("TaskChainCompleted", "Custom") or chains[0][2] != chains[1][2]
-            or report["evidence"].get("internal_error_lines")):
+            or chains[1][:2] != ("TaskChainCompleted", "Custom") or chains[0][2] != chains[1][2]):
         raise ValueError("medicine_scan_execution_unverified")
     completed = []
     for kind, value in events:
@@ -148,9 +147,11 @@ def read_session(report: dict, stage: str, days: int, entry: str) -> dict:
         end = next((i for i, line in enumerate(lines) if "SubTaskCompleted" in line
                     and re.search(r'"task"\s*:\s*"(?:MaaDailyMedicine@)?ScanExpiryB"', line)), None)
         if "ScanExpiryB" in completed and end is not None:
-            from run_with_evidence import LEVEL_PATTERN
+            from check_evidence import error_scope
             prefix = lines[:end + 1]
-            if not any((m := LEVEL_PATTERN.search(line)) and m[1] in {"ERR", "CRT"} for line in prefix):
+            diagnostics = error_scope("".join(prefix).encode("utf-8"), e.get("start_line", 1))
+            result["diagnostics"] = diagnostics
+            if not diagnostics["within_chain"] and not diagnostics["critical"]:
                 try:
                     result.update(read_expiry("".join(prefix).encode("utf-8"), days, "Scan"))
                     result["scan_status"] = "completed"

@@ -5,9 +5,10 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "maa-daily/scripts"))
 import medicine_sanity as med
@@ -161,6 +162,43 @@ class MedicineTests(unittest.TestCase):
             self.assertEqual(result["status"], "detected")
             self.assertEqual(result["cleanup_status"], "unknown")
             self.assertTrue((Path(directory)/"medicine-check.json").is_file())
+
+    def test_dry_run_failure_preserves_only_immediately_verified_prepared_page(self):
+        from test_drain_sanity import probe_body
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Mock(output=Path(directory))
+            pre = report(directory, probe_body().replace("205/205", "16/205"))
+            boundary = pre["evidence"]
+            attempt = {"child_exit_code": 1, "command": {"subcommand": "run", "dry_run": True},
+                       "cli": {"output": "Updating hot update files\nError: Network error\nio: unexpected end of file",
+                               "truncated": False},
+                       "evidence": {"state": "unchanged", "log_file": boundary["log_file"],
+                                    "before_exists": True, "after_exists": True,
+                                    "before_size": boundary["after_size"], "after_size": boundary["after_size"]}}
+            error = subprocess.CalledProcessError(1, ["maa", "run", "--dry-run"])
+            error.report = {"attempts": [attempt]}
+            runtime.run.side_effect = [pre, error]
+            result = med.scan(runtime, "AP-5", 1)
+            self.assertEqual((result["status"], result["end_at"], result["scan_status"]),
+                             ("unknown", "prepared", "not_started"))
+            self.assertTrue(result["reminder_required"])
+            self.assertEqual(result, json.loads((runtime.output / "medicine-check.json").read_text("utf-8")))
+            self.assertEqual(runtime.run.call_count, 2)
+
+            for section, key, changed in (("command", "dry_run", False), ("cli", "truncated", True),
+                                          ("evidence", "log_file", "other.log"), ("evidence", "before_size", 0),
+                                          ("evidence", "state", "bounded")):
+                with self.subTest(key=key):
+                    unsafe = copy.deepcopy(attempt)
+                    unsafe[section][key] = changed
+                    error.report = {"attempts": [unsafe, attempt]}
+                    runtime.run.side_effect = [pre, error]
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        med.scan(runtime, "AP-5", 1)
+            error.report = {"attempts": [attempt]}
+            runtime.run.side_effect = [error]
+            with self.assertRaises(subprocess.CalledProcessError):
+                med.scan(runtime, "AP-5", 1, dialog_open=True)
 
     def test_native_day_semantics_not_calendar_days(self):
         for text, expected in (("7小时", 1), ("C7小时", 1), ("59分钟", 1), ("7天", 8), ("1天", 2),

@@ -16,6 +16,7 @@ from log_evidence import read_evidence
 from stage_runtime import normalize_stage, probe_task
 from medicine_policy import load_policy
 from reward_check import OCR_ITEM
+from run_with_evidence import classify_cli_failure
 
 MP = "MaaDailyMedicine@"
 
@@ -179,9 +180,29 @@ def read_session(report: dict, stage: str, days: int, entry: str) -> dict:
     return result
 
 
+def _dry_run_preserved_page(precondition: dict, report: dict) -> bool:
+    """Every pre-Core attempt must share the verified probe's final log position."""
+    boundary = precondition["evidence"]
+    attempts = report.get("attempts", [])
+    if not attempts:
+        return False
+    for attempt in attempts:
+        command = attempt.get("command", {})
+        evidence = attempt.get("evidence", {})
+        if (command.get("subcommand") != "run" or command.get("dry_run") is not True
+                or classify_cli_failure(attempt)["game_operated"] is not False
+                or evidence.get("log_file") != boundary["log_file"]
+                or evidence.get("before_size") != boundary["after_size"]
+                or evidence.get("after_size") != boundary["after_size"]):
+            return False
+    return True
+
+
 def scan(runtime, stage: str, days: int, *, dialog_open: bool = False, cost: int | None = None) -> dict:
+    precondition = None
     if not dialog_open:
-        sanity = read_probe(runtime.run([probe_task(stage)], "medicine-precondition"), stage)
+        precondition = runtime.run([probe_task(stage)], "medicine-precondition")
+        sanity = read_probe(precondition, stage)
         threshold = stage_cost(stage) if cost is None else cost
         if type(threshold) is not int or threshold <= 0:
             raise ValueError("positive integer cost required")
@@ -190,11 +211,20 @@ def scan(runtime, stage: str, days: int, *, dialog_open: bool = False, cost: int
     entry = "ScanRecoveryDialog" if dialog_open else "ScanRecoveryOpen"
     try:
         report = runtime.run([{"type": "Custom", "params": {"task_names": [MP + entry]}}], "medicine-check")
+    except subprocess.CalledProcessError as error:
+        if precondition is None or not _dry_run_preserved_page(precondition, getattr(error, "report", {})):
+            raise
+        result = {"status": "unknown", "reason": "pre_core_network_eof", "reminder_required": True,
+                  "scan_status": "not_started", "cleanup_status": "not_needed", "execution_status": "failed",
+                  "page_status": "prepared", "end_at": "prepared", "page_basis": "unchanged_since_precondition",
+                  "inventory_complete": False, "quantity": None, "medicine_expire_days": days}
     except ValueError as error:
         report = getattr(error, "report", None)
         if report is None:
             raise
-    result = read_session(report, stage, days, entry)
+        result = read_session(report, stage, days, entry)
+    else:
+        result = read_session(report, stage, days, entry)
     write_json(runtime.output / "medicine-check.json", result)
     return result
 

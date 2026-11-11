@@ -67,6 +67,8 @@ python <skill-root>/scripts/drain_sanity.py run --policy <本机策略.toml> --s
 
 源石分支额外记录 `dialog_type=stone`、`scan_status=not_available`、`reason=stone_recovery_dialog`；只有关闭及准备页核验通过才返回 `end_at=prepared`。不要把该分支报成“临期药已经用完”，也不要因为存在源石界面就归因模拟器卡死。
 
+临期药检查前刚核验过目标准备页时，若随后每次 dry-run 都在进入 MaaCore 前因网络 EOF 退出，且日志位置自准备页核验后一直未变，组件保留 `end_at=prepared`，允许继续领奖。库存仍为未知，`scan_status=not_started`。该结论仅用于当次连续执行。事后补跑须重新核验当前账号和页面。
+
 ## 验证边界
 
 2026-10-20：新增恢复页分支通过离线回归，覆盖药剂页、源石页、关窗失败、返回错误关卡、未知页、跨分支回调及旧资源升级。对两张既有失败截图使用官方模板做离线匹配，药剂模板约 0.511，源石模板约 0.9945。

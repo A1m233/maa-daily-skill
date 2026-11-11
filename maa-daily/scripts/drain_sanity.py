@@ -611,7 +611,7 @@ def _main(args) -> int:
                                           or r.get("runner_exit_code") or r.get("report_error")
                                           or r.get("recovery", {}).get("retried")]
         result["warning_report_files"].extend(r["dry_run_report"] for r in runtime.reports
-            if r.get("dry_run_recovery", {}).get("retried"))
+            if r.get("failed_phase") == "dry_run" or r.get("dry_run_recovery", {}).get("retried"))
         write_json(runtime.output / "result.json", result)
         if os.environ.get(VERBOSE_ENV) == "1":
             print(json.dumps(result, ensure_ascii=False))

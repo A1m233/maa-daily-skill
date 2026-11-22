@@ -74,6 +74,9 @@ class StageTests(unittest.TestCase):
             self.assertEqual((normal / "profiles/mumu.toml").read_bytes(), profile.read_bytes())
             self.assertEqual(normal_nodes[stage.VERIFY]["text"], ["PR-D-2"])
             self.assertEqual(normal_nodes[stage.VERIFY]["action"], "DoNothing")
+            self.assertEqual(normal_nodes[stage.VERIFY]["baseTask"], "ClickedCorrectStage")
+            self.assertTrue(normal_nodes[stage.VERIFY]["fullMatch"])
+            self.assertNotIn("ocrReplace", normal_nodes[stage.VERIFY])
             self.assertNotIn("FightBegin", normal_nodes)
             self.assertEqual(normal_nodes["Explicit@StartButton2"]["action"], "ClickSelf")
             for key in (*stage.stop_resource(), "Explicit@StartButton2"):

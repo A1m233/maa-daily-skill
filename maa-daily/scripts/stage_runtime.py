@@ -26,7 +26,9 @@ def probe_task(stage: str) -> dict:
 
 
 def probe_resource(stage: str) -> dict:
-    return {VERIFY: {"algorithm": "OcrDetect", "text": [normalize_stage(stage)], "fullMatch": True,
+    # 继承当前官方准备页的 OCR 归一化，兼容连读的 OPERATION 前缀与标点。
+    return {VERIFY: {"baseTask": "ClickedCorrectStage",
+                    "algorithm": "OcrDetect", "text": [normalize_stage(stage)], "fullMatch": True,
                     "isAscii": True, "roi": [845, 72, 220, 50], "action": "DoNothing",
                     "next": ["MaaDailyCheck@StagePage"], "maxTimes": 1}}
 

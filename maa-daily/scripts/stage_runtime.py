@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 import shutil
 
+from resource_templates import manifest, read
+
 VERIFY = "MaaDailyCheck@VerifyStage"
 STOP_NODES = {"FightBegin", "StartButton1", "StartButton2", "MedicineConfirm",
               "ExpiringMedicineConfirm", "StoneConfirm"}
@@ -25,9 +27,44 @@ def probe_task(stage: str) -> dict:
     return {"type": "Custom", "params": {"task_names": [VERIFY]}}
 
 
-def probe_resource(stage: str) -> dict:
+def stage_ocr_overrides(config: Path) -> dict:
+    """在已绑定资源的规则之前补齐标题大小写；不复制固定版本的规则表。"""
+    binding = manifest(config)
+    if binding is None:
+        # 旧的独立调用仍交给 MaaCore 继承；完整日常要求先完成资源绑定。
+        return {}
+    base = "ClickedCorrectStage"
+    definition = {}
+    for root in [*(Path(p) for p in binding["roots"]), config / "resource"]:
+        if not root.is_dir():
+            raise ValueError(f"stage_ocr_resource_layer_missing: {root}")
+        matches = [data[base] for path in sorted((root / "tasks").rglob("*.json"))
+                   if base in (data := read(path))]
+        if len(matches) > 1:
+            raise ValueError("ambiguous_stage_ocr_definition")
+        if matches:
+            node = matches[0]
+            if not isinstance(node, dict):
+                raise ValueError("invalid_stage_ocr_definition")
+            definition = node if "baseTask" in node else {**definition, **node}
+    # 此处只读直接 OCR 定义及普通字段覆盖，不自行模拟 MaaCore 的任务继承。
+    if (definition.get("baseTask") not in (None, "#none")
+            or definition.get("algorithm") != "OcrDetect"
+            or definition.get("replaceFull", False) is not False):
+        raise ValueError("unsupported_stage_ocr_definition")
+    rules = definition.get("ocrReplace")
+    if not isinstance(rules, list) or any(
+            not isinstance(pair, list) or len(pair) != 2
+            or any(not isinstance(value, str) for value in pair) for pair in rules):
+        raise ValueError("invalid_stage_ocr_replacements")
+    # 显式字符类兼容原生正则；只删除开头的完整标题，不改关卡代码或匹配方式。
+    return {"ocrReplace": [["^[Oo][Pp][Ee][Rr][Aa][Tt][Ii][Oo][Nn]", ""], *rules],
+            "replaceFull": False}
+
+
+def probe_resource(stage: str, ocr_overrides: dict | None = None) -> dict:
     # 继承当前官方准备页的 OCR 归一化，兼容连读的 OPERATION 前缀与标点。
-    return {VERIFY: {"baseTask": "ClickedCorrectStage",
+    return {VERIFY: {"baseTask": "ClickedCorrectStage", **(ocr_overrides or {}),
                     "algorithm": "OcrDetect", "text": [normalize_stage(stage)], "fullMatch": True,
                     "isAscii": True, "roi": [845, 72, 220, 50], "action": "DoNothing",
                     "next": ["MaaDailyCheck@StagePage"], "maxTimes": 1}}
@@ -57,6 +94,7 @@ def _snapshot_backups(source: Path, directory: str, names: list[str]) -> set[str
 def isolated_config(source: Path, target: Path, stage: str, *, navigation: bool) -> Path:
     """新目录快照，不改用户 profile/resource。守卫仅注入导航快照。"""
     normalize_stage(stage)
+    ocr_overrides = stage_ocr_overrides(source)
     target.mkdir(parents=True, exist_ok=False)
     for folder in ("profiles", "resource"):
         if (source / folder).is_dir():
@@ -70,7 +108,7 @@ def isolated_config(source: Path, target: Path, stage: str, *, navigation: bool)
     task_root.mkdir(parents=True, exist_ok=True)
     path = task_root / "tasks.json"
     nodes = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
-    nodes.update(probe_resource(stage))
+    nodes.update(probe_resource(stage, ocr_overrides))
     if navigation:
         guards = stop_resource()
         # 显式用户命名空间可能遮蔽基础节点：仅在快照内一起阻断。

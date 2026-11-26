@@ -1,7 +1,9 @@
 import contextlib
 import io
 import json
+import itertools
 from pathlib import Path
+import re
 import sys
 import tempfile
 import unittest
@@ -17,6 +19,84 @@ class StageTests(unittest.TestCase):
     def setUp(self):
         from fake_cli import dry
         self.enterContext(patch.object(drain, "run_dry", side_effect=dry))
+
+    def bound_config(self, root):
+        source, official = root / "source", root / "official"
+        for path in (source / "resource/tasks", source / "policies", official / "tasks"):
+            path.mkdir(parents=True)
+        # v6.22.0 ClickedCorrectStage 的相关规则及顺序；最后两个大小写修正在标题删除之后。
+        rules = [["OPERATION", ""], [" ", ""], ["s", "S"], ["c", "C"], ["o", "O"], ["'", ""]]
+        (official / "tasks/tasks.json").write_text(json.dumps({"ClickedCorrectStage": {
+            "algorithm": "OcrDetect", "ocrReplace": rules}}), encoding="utf-8")
+        (source / "policies/resource-templates.json").write_text(json.dumps({
+            "version": 1, "roots": [str(official)], "nodes": {"MaaDailyCheck@DailyPage": {}}}), encoding="utf-8")
+        return source, official, rules
+
+    def test_bound_probe_normalizes_mixed_title_but_requires_exact_stage(self):
+        def normalize(text, rules):
+            for pattern, replacement in rules:
+                text = re.sub(pattern, replacement, text)
+            return text
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, official, upstream = self.bound_config(root)
+            original = (official / "tasks/tasks.json").read_bytes()
+            self.assertNotEqual(normalize("oPERATIoNLS-6'", upstream), "LS-6")
+            for navigation in (False, True):
+                snapshot = stage.isolated_config(source, root / str(navigation), "LS-6", navigation=navigation)
+                node = json.loads((snapshot / "resource/tasks/tasks.json").read_text())[stage.VERIFY]
+                self.assertEqual(node["action"], "DoNothing")
+                self.assertTrue(node["fullMatch"])
+                self.assertEqual(node["ocrReplace"][1:], upstream)
+                for target in ("LS-6", "CE-6", "AP-5", "PR-D-2", "1-7"):
+                    self.assertEqual(normalize(target, node["ocrReplace"]), target)
+                    for letters in itertools.product(*(tuple({c, c.lower()}) for c in "OPERATION")):
+                        raw = "".join(letters) + target + "'"
+                        self.assertEqual(normalize(raw, node["ocrReplace"]), target)
+                for raw in ("oPERATIONLS-5'", "oPERATIONLS-60'", "xoperationLS-6'",
+                            "LS-6operation", "OPERATLS-6", "operationCE-6", "operationLS-6X"):
+                    self.assertNotIn(normalize(raw, node["ocrReplace"]), node["text"])
+            self.assertEqual((official / "tasks/tasks.json").read_bytes(), original)
+            self.assertFalse((source / "resource/tasks/tasks.json").exists())
+
+    def test_bound_probe_preserves_current_layer_and_user_ocr_rules(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, official, _ = self.bound_config(root)
+            overlay = root / "overlay"
+            (overlay / "tasks").mkdir(parents=True)
+            path = source / "policies/resource-templates.json"
+            binding = json.loads(path.read_text())
+            binding["roots"].append(str(overlay))
+            path.write_text(json.dumps(binding), encoding="utf-8")
+            resource = overlay / "tasks/tasks.json"
+            for prefix in ("OPERATION", "(O|D)?PERATION"):
+                rules = [[prefix, ""], ["future-normalization", "LS-6"]]
+                resource.write_text(json.dumps({"ClickedCorrectStage": {"ocrReplace": rules}}), encoding="utf-8")
+                self.assertEqual(stage.stage_ocr_overrides(source)["ocrReplace"][1:], rules)
+            user_rules = [["user-normalization", "LS-6"]]
+            (source / "resource/tasks/user.json").write_text(json.dumps({
+                "ClickedCorrectStage": {"ocrReplace": user_rules}}), encoding="utf-8")
+            self.assertEqual(stage.stage_ocr_overrides(source)["ocrReplace"][1:], user_rules)
+
+    def test_bound_probe_rejects_ambiguous_or_unsupported_rules_before_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, official, _ = self.bound_config(root)
+            resource = official / "tasks/tasks.json"
+            for definition in ({}, {"algorithm": "MatchTemplate", "ocrReplace": []},
+                               {"algorithm": "OcrDetect", "ocrReplace": "bad"},
+                               {"algorithm": "OcrDetect", "ocrReplace": [["a", 1]]},
+                               {"algorithm": "OcrDetect", "ocrReplace": [], "replaceFull": True},
+                               {"baseTask": "Unknown", "algorithm": "OcrDetect", "ocrReplace": []}):
+                resource.write_text(json.dumps({"ClickedCorrectStage": definition}), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    stage.isolated_config(source, root / "run", "LS-6", navigation=False)
+                self.assertFalse((root / "run").exists())
+            (official / "tasks/duplicate.json").write_bytes(resource.read_bytes())
+            with self.assertRaisesRegex(ValueError, "ambiguous_stage_ocr"):
+                stage.stage_ocr_overrides(source)
 
     def test_navigation_warnings_preserved_but_do_not_replace_semantic_checks(self):
         from test_drain_sanity import DrainTests, event

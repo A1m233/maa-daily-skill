@@ -4,6 +4,7 @@ import io
 import datetime as dt
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -15,6 +16,67 @@ import daily_run as daily
 
 
 class DailyTests(unittest.TestCase):
+    def test_daily_drain_retains_binding_through_child_runtime_snapshots(self):
+        import drain_sanity
+        import stage_runtime
+        from test_stage_runtime import StageTests
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, _, _ = StageTests().bound_config(root)
+            assets = Path(daily.__file__).resolve().parents[1] / "assets/daily-checks/tasks.json"
+            (source / "resource/tasks/tasks.json").write_bytes(assets.read_bytes())
+            policy = source / "policies/medicine.toml"
+            policy.write_text('[expiring_medicine]\nmode="off"\nmedicine_expire_days=1\n', encoding="utf-8")
+            original_binding = (source / "policies/resource-templates.json").read_bytes()
+            config = {"pre_tasks": ["pre"], "stage_task": "stage", "award_task": "award",
+                      "medicine_policy": str(policy), "priority_goal": "weekly_cap",
+                      "maximum": 10, "max_runs": 100, "max_phases": 5}
+            tasks = {"pre": [{"type": "Recruit", "params": {}}],
+                     "stage": [{"type": "Fight", "params": {"stage": "LS-6", "times": 0}}],
+                     "award": [{"type": "Award", "params": {"award": True}}]}
+            inspected = []
+
+            def before_navigation(runtime, *args):
+                # 实际子组件完成二次快照后检查，再停止于任何游戏操作之前。
+                for snapshot in (runtime.config, runtime.stage_config, runtime.navigation_config):
+                    self.assertEqual((snapshot / "policies/resource-templates.json").read_bytes(), original_binding)
+                    self.assertFalse((snapshot / "policies/medicine.toml").exists())
+                    nodes = json.loads((snapshot / "resource/tasks/tasks.json").read_text(encoding="utf-8"))
+                    node = nodes[stage_runtime.VERIFY]
+                    self.assertEqual(node["ocrReplace"], stage_runtime.stage_ocr_overrides(source)["ocrReplace"])
+                    self.assertEqual(node["text"], ["LS-6"])
+                    self.assertTrue(node["fullMatch"])
+                    self.assertEqual(node["action"], "DoNothing")
+                    if snapshot == runtime.navigation_config:
+                        self.assertEqual(nodes["FightBegin"]["action"], "Stop")
+                    else:
+                        self.assertNotIn("FightBegin", nodes)
+                    inspected.append(snapshot)
+                raise ValueError("fixture_stop_before_game")
+
+            def subprocess_boundary(command, **kwargs):
+                if command[1:3] == ["dir", "config"]:
+                    return daily.subprocess.CompletedProcess(command, 0, os.environ.get("MAA_CONFIG_DIR", str(source)))
+                self.assertEqual(Path(command[4]).name, "drain_sanity.py")
+                with patch.dict(os.environ, kwargs["env"]):
+                    code = drain_sanity.main(command[5:])
+                return daily.subprocess.CompletedProcess(command, code)
+
+            with patch.dict(os.environ, {"MAA_CONFIG_DIR": str(source)}), \
+                 patch.object(daily, "check_install", return_value=source), \
+                 patch.object(daily.Daily, "resolve", side_effect=lambda name: tasks[name]), \
+                 patch.object(daily, "medicine_preflight"), patch("medicine_sanity.preflight"), \
+                 patch.object(daily.subprocess, "run", side_effect=subprocess_boundary), \
+                 patch.object(drain_sanity, "navigate", side_effect=before_navigation), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                ops = daily.Daily(config, "fake-maa", "test", "example", root / "output")
+                result = ops.drain()
+                ops.runtime.artifacts.finish("failed")
+            self.assertEqual(result["reason"], "fixture_stop_before_game")
+            self.assertEqual(len(inspected), 3)
+            self.assertEqual((source / "policies/resource-templates.json").read_bytes(), original_binding)
+
     def test_navigation_failure_result_reaches_daily_without_missing_file_error(self):
         import drain_sanity
         with tempfile.TemporaryDirectory() as directory:

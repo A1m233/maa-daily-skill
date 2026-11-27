@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import shutil
 
-from resource_templates import manifest, read
+from resource_templates import MANIFEST, manifest, read
 
 VERIFY = "MaaDailyCheck@VerifyStage"
 STOP_NODES = {"FightBegin", "StartButton1", "StartButton2", "MedicineConfirm",
@@ -96,6 +96,11 @@ def isolated_config(source: Path, target: Path, stage: str, *, navigation: bool)
     normalize_stage(stage)
     ocr_overrides = stage_ocr_overrides(source)
     target.mkdir(parents=True, exist_ok=False)
+    # 日常执行器会把此快照交给清体力子进程再次快照；绑定必须随资源一起传递。
+    # 只带入资源元数据，其它业务策略仍由调用方显式传参，不复制整个 policies。
+    if (source / MANIFEST).is_file():
+        (target / MANIFEST).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source / MANIFEST, target / MANIFEST)
     for folder in ("profiles", "resource"):
         if (source / folder).is_dir():
             shutil.copytree(source / folder, target / folder,
